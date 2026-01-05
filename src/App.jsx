@@ -8,9 +8,6 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend 
-} from 'recharts';
-import { 
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
   Plus, Minus, ArrowRightLeft, Trash2, Check, User, 
   Calendar, DollarSign, Target, Settings, LogOut,
@@ -52,6 +49,60 @@ const CATEGORIES = [
 
 const formatMoney = (amount) => {
   return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(amount);
+};
+
+// --- Custom Simple Chart Component (Replaces Recharts) ---
+const SimpleDonutChart = ({ data, total }) => {
+  if (total === 0) {
+    return (
+      <div className="h-64 w-full flex items-center justify-center">
+        <div className="w-48 h-48 rounded-full border-4 border-gray-100 flex items-center justify-center">
+           <span className="text-gray-300 font-bold text-sm">尚無數據</span>
+        </div>
+      </div>
+    );
+  }
+
+  let accumulatedPercent = 0;
+
+  return (
+    <div className="relative w-64 h-64 mx-auto">
+      {/* SVG ViewBox 0 0 42 42 is a standard trick for easy percentages (radius ~15.9155 creates circumference 100) */}
+      <svg viewBox="0 0 42 42" className="w-full h-full">
+        {/* Background Circle */}
+        <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#f3f4f6" strokeWidth="5"></circle>
+
+        {data.map((item, index) => {
+          const percent = (item.value / total) * 100;
+          const strokeDasharray = `${percent} ${100 - percent}`;
+          // Offset starts at 3 o'clock (0 deg). We want 12 o'clock (-90 deg or 25 units).
+          // stroke-dashoffset is counter-clockwise from start.
+          const offset = 25 - accumulatedPercent;
+          accumulatedPercent += percent;
+
+          return (
+            <circle
+              key={index}
+              cx="21"
+              cy="21"
+              r="15.91549430918954"
+              fill="transparent"
+              stroke={item.color}
+              strokeWidth="5"
+              strokeDasharray={strokeDasharray}
+              strokeDashoffset={offset}
+              className="transition-all duration-500 ease-out"
+            />
+          );
+        })}
+      </svg>
+      {/* Center Text */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+         <span className="text-xs text-gray-400 font-bold uppercase tracking-wider">總支出</span>
+         <span className="text-2xl font-black text-gray-800">{formatMoney(total)}</span>
+      </div>
+    </div>
+  );
 };
 
 // --- Main Component ---
@@ -632,20 +683,8 @@ const Statistics = ({ transactions }) => {
 
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center">
         <h3 className="text-gray-500 mb-4">月支出分佈</h3>
-        <div className="h-64 w-full">
-           <ResponsiveContainer width="100%" height="100%">
-             <PieChart>
-               <Pie data={statsData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                 {statsData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-               </Pie>
-               <RechartsTooltip formatter={(value) => formatMoney(value)} />
-               <Legend />
-             </PieChart>
-           </ResponsiveContainer>
-        </div>
-        <div className="text-center mt-[-10px]">
-          <span className="text-sm text-gray-400">總計</span>
-          <div className="text-2xl font-bold text-gray-800">{formatMoney(total)}</div>
+        <div className="w-full">
+           <SimpleDonutChart data={statsData} total={total} />
         </div>
       </div>
 
