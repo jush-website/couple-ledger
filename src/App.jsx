@@ -8,9 +8,6 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend 
-} from 'recharts';
-import { 
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
   Plus, Minus, ArrowRightLeft, Trash2, Check, User, 
   Calendar, DollarSign, Target, Settings, LogOut,
@@ -304,7 +301,8 @@ export default function CoupleLedgerApp() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 font-sans text-gray-800">
+    // 使用 w-full 和 min-h-screen 確保全螢幕，移除 max-w-md 限制
+    <div className="min-h-screen w-full bg-gray-50 pb-20 font-sans text-gray-800">
       <style>{`
         /* Scrollbar Hiding */
         .scrollbar-hide::-webkit-scrollbar { display: none; }
@@ -324,20 +322,20 @@ export default function CoupleLedgerApp() {
         </div>
       )}
 
-      {/* Header */}
-      <div className={`p-4 text-white shadow-md flex justify-between items-center transition-colors ${role === 'bf' ? 'bg-blue-600' : 'bg-pink-500'}`}>
+      {/* Header - Full Width */}
+      <div className={`p-4 text-white shadow-md flex justify-between items-center transition-colors sticky top-0 z-40 ${role === 'bf' ? 'bg-blue-600' : 'bg-pink-500'}`}>
         <div className="flex items-center gap-2">
           <Heart className="fill-white animate-pulse" size={20} />
           <h1 className="text-xl font-bold tracking-wide">我們的小金庫</h1>
         </div>
-        <div className="flex items-center gap-2 text-sm bg-white/20 px-3 py-1 rounded-full">
+        <div className="flex items-center gap-2 text-sm bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
           <User size={14} />
           <span>我是{role === 'bf' ? '男朋友' : '女朋友'}</span>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-md mx-auto p-4">
+      {/* Main Content Area - Full Width Container */}
+      <div className="p-4 w-full max-w-4xl mx-auto">
         {activeTab === 'overview' && (
           <Overview 
             transactions={transactions} 
@@ -377,7 +375,7 @@ export default function CoupleLedgerApp() {
         )}
       </div>
 
-      {/* Bottom Navigation */}
+      {/* Bottom Navigation - Fixed Bottom Full Width */}
       <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 z-50 text-xs shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
         <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
         <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
@@ -385,7 +383,7 @@ export default function CoupleLedgerApp() {
         <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
       </div>
 
-      {/* Modals */}
+      {/* Modals Layer */}
       {showAddTransaction && (
         <AddTransactionModal 
           onClose={() => setShowAddTransaction(false)} 
@@ -684,7 +682,7 @@ const SettingsView = ({ role, onLogout }) => (
        </div>
        <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={18} /> 重選身分 / 登出</button>
     </div>
-    <div className="bg-white p-6 rounded-3xl shadow-sm text-center"><p className="text-gray-400 text-sm">我們的小金庫 v1.7</p><p className="text-gray-300 text-xs mt-2">Designed for Couples</p></div>
+    <div className="bg-white p-6 rounded-3xl shadow-sm text-center"><p className="text-gray-400 text-sm">我們的小金庫 v1.9</p><p className="text-gray-300 text-xs mt-2">Designed for Couples</p></div>
   </div>
 );
 
@@ -768,14 +766,21 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
                 </div>
               </div>
               <input type="text" value={note} onChange={(e) => setNote(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-100" placeholder="備註 (選填)" />
-              <div className="grid grid-cols-2 gap-4">
-                 <div><label className="text-xs text-gray-400 font-bold ml-1">誰付錢？</label><div className="flex gap-2 mt-1"><button onClick={() => setPayer('bf')} className={`flex-1 py-2 rounded-lg text-sm font-bold border ${payer === 'bf' ? 'bg-blue-50 border-blue-500 text-blue-600' : 'border-gray-200 text-gray-400'}`}>男友</button><button onClick={() => setPayer('gf')} className={`flex-1 py-2 rounded-lg text-sm font-bold border ${payer === 'gf' ? 'bg-pink-50 border-pink-500 text-pink-600' : 'border-gray-200 text-gray-400'}`}>女友</button></div></div>
+              
+              {/* Payer Section: Full width now to prevent squishing */}
+              <div>
+                 <label className="text-xs text-gray-400 font-bold ml-1 mb-1 block">誰付錢？</label>
+                 <div className="flex gap-2">
+                    <button onClick={() => setPayer('bf')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${payer === 'bf' ? 'bg-blue-50 border-blue-500 text-blue-600' : 'border-gray-100 text-gray-400'}`}>男友</button>
+                    <button onClick={() => setPayer('gf')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${payer === 'gf' ? 'bg-pink-50 border-pink-500 text-pink-600' : 'border-gray-100 text-gray-400'}`}>女友</button>
+                 </div>
               </div>
+
               <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
                 <label className="text-xs text-gray-400 font-bold mb-2 block">分帳設定</label>
                 <div className="flex gap-1 bg-gray-200 p-1 rounded-lg mb-4">{['equal', 'percent', 'amount'].map(m => (<button key={m} onClick={() => setSplitMode(m)} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${splitMode === m ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`}>{m === 'equal' ? '均分' : m === 'percent' ? '比例' : '金額'}</button>))}</div>
                 {splitMode === 'equal' && (<div className="flex gap-2"><button onClick={() => { setSplitMode('amount'); setBfAmount(Number(amount)); setGfAmount(0); }} className="flex-1 py-2 border border-blue-200 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50">男友全出</button><button onClick={() => { setSplitMode('amount'); setBfAmount(0); setGfAmount(Number(amount)); }} className="flex-1 py-2 border border-pink-200 text-pink-500 rounded-lg text-xs font-bold hover:bg-pink-50">女友全出</button></div>)}
-                {splitMode === 'amount' && (<div className="flex gap-3"><input type="number" value={bfAmount} onChange={(e) => { setBfAmount(e.target.value); setGfAmount(Number(amount)-e.target.value); }} className="flex-1 p-2 bg-white border border-gray-200 rounded-lg text-sm text-center font-bold" /><input type="number" value={gfAmount} onChange={(e) => { setGfAmount(e.target.value); setBfAmount(Number(amount)-e.target.value); }} className="flex-1 p-2 bg-white border border-gray-200 rounded-lg text-sm text-center font-bold" /></div>)}
+                {splitMode === 'amount' && (<div className="flex gap-3"><input type="number" value={bfAmount} onChange={(e) => { setBfAmount(e.target.value); setGfAmount(Number(amount)-e.target.value); }} className="flex-1 min-w-0 p-2 bg-white border border-gray-200 rounded-lg text-sm text-center font-bold" /><input type="number" value={gfAmount} onChange={(e) => { setGfAmount(e.target.value); setBfAmount(Number(amount)-e.target.value); }} className="flex-1 min-w-0 p-2 bg-white border border-gray-200 rounded-lg text-sm text-center font-bold" /></div>)}
                 {splitMode === 'percent' && (
                   <div className="space-y-3">
                     <div className="flex justify-between text-xs font-bold"><span className="text-blue-500">男友 {bfPercent}%</span><span className="text-pink-500">女友 {100 - bfPercent}%</span></div>
@@ -818,8 +823,8 @@ const DepositModal = ({ jar, onClose, onConfirm, role }) => {
   const [amount, setAmount] = useState('');
   if (!jar) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
         <h3 className="text-xl font-bold mb-2">存入資金</h3>
         <p className="text-gray-400 text-sm mb-4">目標：{jar.name}</p>
         <div className="relative mb-4"><DollarSign size={20} className="absolute left-3 top-3 text-gray-400" /><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-gray-50 p-3 pl-10 rounded-xl text-2xl font-bold outline-none focus:ring-2 focus:ring-blue-100" placeholder="0" autoFocus /></div>
