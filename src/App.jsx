@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
@@ -9,12 +9,13 @@ import {
 } from 'firebase/auth';
 import { 
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
-  Plus, Minus, ArrowRightLeft, Trash2, Check, User, 
-  Calendar, DollarSign, Target, Settings, LogOut,
-  RefreshCw, Pencil, CheckCircle, AlertTriangle, X
+  Plus, ArrowRightLeft, Trash2, Check, User, 
+  Calendar, Target, Settings, LogOut,
+  RefreshCw, Pencil, CheckCircle, AlertTriangle, X,
+  ChevronLeft, ChevronRight, ArrowLeft, Percent, Calculator, History
 } from 'lucide-react';
 
-// --- Firebase Configuration & Initialization ---
+// --- Firebase Configuration ---
 const firebaseConfig = {
   apiKey: "AIzaSyDPUjZ1dUV52O7JUeY-7befolezIWpI6vo",
   authDomain: "money-49190.firebaseapp.com",
@@ -25,17 +26,21 @@ const firebaseConfig = {
   measurementId: "G-XD01TYP1PQ"
 };
 
-const app = initializeApp(firebaseConfig);
+// Singleton initialization
+let app;
+try {
+  app = initializeApp(firebaseConfig);
+} catch (e) {
+  // Ignore if already initialized
+}
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// FIX: Sanitize appId
+const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const appId = rawAppId.replace(/\//g, '_').replace(/\./g, '_');
 
 // --- Constants & Helpers ---
-const ROLES = {
-  BF: { id: 'bf', label: '男朋友', color: 'bg-blue-500', text: 'text-blue-500', border: 'border-blue-500', light: 'bg-blue-100' },
-  GF: { id: 'gf', label: '女朋友', color: 'bg-pink-500', text: 'text-pink-500', border: 'border-pink-500', light: 'bg-pink-100' }
-};
-
 const CATEGORIES = [
   { id: 'food', name: '餐飲', color: '#FF8042' },
   { id: 'transport', name: '交通', color: '#00C49F' },
@@ -48,49 +53,141 @@ const CATEGORIES = [
 ];
 
 const formatMoney = (amount) => {
-  return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(amount);
+  const num = Number(amount);
+  if (isNaN(num)) return '$0';
+  return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(num);
 };
 
-// --- Custom Simple Chart Component ---
+// Safe simple calculator
+const safeCalculate = (expression) => {
+  try {
+    const sanitized = (expression || '').toString().replace(/[^0-9+\-*/.]/g, '');
+    if (!sanitized) return '';
+    const parts = sanitized.split(/([+\-*/])/).filter(p => p.trim() !== '');
+    if (parts.length === 0) return '';
+    
+    // Simple math evaluation
+    let tokens = [...parts];
+    // Mul/Div
+    for (let i = 1; i < tokens.length - 1; i += 2) {
+      if (tokens[i] === '*' || tokens[i] === '/') {
+        const prev = parseFloat(tokens[i-1]);
+        const next = parseFloat(tokens[i+1]);
+        const op = tokens[i];
+        let res = 0;
+        if (op === '*') res = prev * next;
+        if (op === '/') res = prev / next;
+        tokens.splice(i-1, 3, res);
+        i -= 2;
+      }
+    }
+    // Add/Sub
+    let result = parseFloat(tokens[0]);
+    for (let i = 1; i < tokens.length; i += 2) {
+      const op = tokens[i];
+      const next = parseFloat(tokens[i+1]);
+      if (op === '+') result += next;
+      if (op === '-') result -= next;
+    }
+    return isNaN(result) || !isFinite(result) ? '' : Math.floor(result).toString();
+  } catch (e) {
+    return '';
+  }
+};
+
+// --- Components ---
+
+const AppLoading = () => (
+  <div className="fixed inset-0 z-[9999] bg-gradient-to-br from-pink-50 to-blue-50 flex flex-col items-center justify-center">
+    <div className="relative">
+      <div className="absolute inset-0 bg-white rounded-full blur-xl opacity-50 animate-pulse"></div>
+      <div className="bg-white p-6 rounded-full shadow-2xl relative z-10 animate-bounce">
+        <Heart className="text-pink-500 fill-pink-500" size={64} />
+      </div>
+    </div>
+    <h2 className="mt-8 text-2xl font-bold text-gray-700 tracking-widest animate-pulse">載入中...</h2>
+    <p className="text-gray-400 text-sm mt-2">正在同步我們的小金庫</p>
+  </div>
+);
+
+const CalculatorKeypad = ({ value, onChange, onConfirm, compact = false }) => {
+  const handlePress = (key) => {
+    const strVal = (value || '').toString();
+    if (key === 'C') onChange('');
+    else if (key === '=') onChange(safeCalculate(strVal));
+    else if (key === 'backspace') onChange(strVal.slice(0, -1));
+    else {
+      const lastChar = strVal.slice(-1);
+      const isOperator = ['+', '-', '*', '/'].includes(key);
+      const isLastOperator = ['+', '-', '*', '/'].includes(lastChar);
+      if (isOperator && isLastOperator) onChange(strVal.slice(0, -1) + key);
+      else onChange(strVal + key);
+    }
+  };
+
+  const keys = [
+    { label: '7', type: 'num' }, { label: '8', type: 'num' }, { label: '9', type: 'num' }, { label: '÷', val: '/', type: 'op' },
+    { label: '4', type: 'num' }, { label: '5', type: 'num' }, { label: '6', type: 'num' }, { label: '×', val: '*', type: 'op' },
+    { label: '1', type: 'num' }, { label: '2', type: 'num' }, { label: '3', type: 'num' }, { label: '-', val: '-', type: 'op' },
+    { label: 'C', type: 'action', color: 'text-red-500' }, { label: '0', type: 'num' }, { label: '.', type: 'num' }, { label: '+', val: '+', type: 'op' },
+  ];
+
+  return (
+    <div className={`bg-gray-50 p-2 rounded-2xl select-none ${compact ? 'mt-1' : 'mt-4'}`}>
+      <div className="grid grid-cols-4 gap-2 mb-2">
+        {keys.map((k, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => handlePress(k.val || k.label)}
+            className={`
+              ${compact ? 'h-9 text-base' : 'h-11 text-lg'} rounded-xl font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center
+              ${k.type === 'op' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-700'}
+              ${k.color || ''}
+            `}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-2">
+         <button type="button" onClick={() => handlePress('backspace')} className={`${compact ? 'h-9' : 'h-11'} flex-1 bg-gray-200 rounded-xl flex items-center justify-center text-gray-600 active:scale-95 transition-transform hover:bg-gray-300`}>
+           <ArrowLeft size={compact ? 20 : 24} />
+         </button>
+         <button type="button" onClick={() => { const result = safeCalculate(value); onChange(result); onConfirm && onConfirm(result); }} className={`${compact ? 'h-9' : 'h-11'} flex-[2] bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md`}>
+            <Check size={20} /> <span>確認</span>
+         </button>
+      </div>
+    </div>
+  );
+};
+
 const SimpleDonutChart = ({ data, total }) => {
-  if (total === 0) {
+  if (!total || total === 0) {
     return (
       <div className="h-64 w-full flex items-center justify-center">
         <div className="w-48 h-48 rounded-full border-4 border-gray-100 flex items-center justify-center">
-           <span className="text-gray-300 font-bold text-sm">尚無數據</span>
+           <span className="text-gray-300 font-bold text-sm">本月尚無數據</span>
         </div>
       </div>
     );
   }
-
   let accumulatedPercent = 0;
-
   return (
-    <div className="relative w-64 h-64 mx-auto">
-      <svg viewBox="0 0 42 42" className="w-full h-full">
+    <div className="relative w-64 h-64 mx-auto my-6">
+      <svg viewBox="0 0 42 42" className="w-full h-full transform -rotate-90">
         <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#f3f4f6" strokeWidth="5"></circle>
         {data.map((item, index) => {
           const percent = (item.value / total) * 100;
           const strokeDasharray = `${percent} ${100 - percent}`;
-          const offset = 25 - accumulatedPercent;
+          const offset = 100 - accumulatedPercent; 
           accumulatedPercent += percent;
           return (
-            <circle
-              key={index}
-              cx="21"
-              cy="21"
-              r="15.91549430918954"
-              fill="transparent"
-              stroke={item.color}
-              strokeWidth="5"
-              strokeDasharray={strokeDasharray}
-              strokeDashoffset={offset}
-              className="transition-all duration-500 ease-out"
-            />
+            <circle key={index} cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke={item.color} strokeWidth="5" strokeDasharray={strokeDasharray} strokeDashoffset={offset} className="transition-all duration-500 ease-out" />
           );
         })}
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transform rotate-90">
          <span className="text-xs text-gray-400 font-bold uppercase tracking-wider">總支出</span>
          <span className="text-2xl font-black text-gray-800">{formatMoney(total)}</span>
       </div>
@@ -98,159 +195,99 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
-// --- Main Component ---
+// --- Main Application ---
 export default function CoupleLedgerApp() {
+  const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null); 
   const [activeTab, setActiveTab] = useState('overview');
-  
-  // Data States
+
   const [transactions, setTransactions] = useState([]);
   const [jars, setJars] = useState([]);
-  
-  // Modals & Editing States
+
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null); 
   const [showAddJar, setShowAddJar] = useState(false);
   const [editingJar, setEditingJar] = useState(null); 
-  const [showJarDeposit, setShowJarDeposit] = useState(null); 
-
-  // Notification State
+  const [showJarDeposit, setShowJarDeposit] = useState(null);
+  
+  // History Feature
+  const [showJarHistory, setShowJarHistory] = useState(null); 
+  
   const [toast, setToast] = useState(null); 
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false });
 
-  // Confirmation Modal State
-  const [confirmModal, setConfirmModal] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: null,
-    isDanger: false
-  });
-
-  // --- Auto-Inject Tailwind & Styles ---
   useEffect(() => {
     if (!document.querySelector('script[src*="tailwindcss"]')) {
       const script = document.createElement('script');
       script.src = "https://cdn.tailwindcss.com";
       document.head.appendChild(script);
     }
-  }, []);
-
-  // Helper to show toast
-  const showToast = (message) => {
-    setToast(message);
-    setTimeout(() => setToast(null), 3000);
-  };
-
-  // Helper to open confirmation
-  const openConfirm = (title, message, onConfirm, isDanger = false) => {
-    setConfirmModal({ isOpen: true, title, message, onConfirm, isDanger });
-  };
-
-  const closeConfirm = () => {
-    setConfirmModal(prev => ({ ...prev, isOpen: false }));
-  };
-
-  // --- Authentication & Identity ---
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Auth Error", error);
-      }
-    };
+    const timer = setTimeout(() => setLoading(false), 2000);
+    const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) { console.error(e); } };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
     const savedRole = localStorage.getItem('couple_app_role');
     if (savedRole) setRole(savedRole);
-    return () => unsubscribe();
+    return () => { clearTimeout(timer); unsubscribe(); };
   }, []);
 
-  // --- Data Fetching ---
   useEffect(() => {
     if (!user) return;
-    const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
-    const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
-
-    const unsubTrans = onSnapshot(transRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      data.sort((a, b) => {
-        const dateA = new Date(a.date).getTime();
-        const dateB = new Date(b.date).getTime();
-        if (dateB !== dateA) return dateB - dateA;
-        return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
-      });
-      setTransactions(data);
-    });
-
-    const unsubJars = onSnapshot(jarsRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-      setJars(data);
-    });
-
-    return () => {
-      unsubTrans();
-      unsubJars();
-    };
+    try {
+        const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
+        const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
+        const unsubTrans = onSnapshot(transRef, (s) => setTransactions(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => new Date(b.date) - new Date(a.date))));
+        const unsubJars = onSnapshot(jarsRef, (s) => setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))));
+        return () => { unsubTrans(); unsubJars(); };
+    } catch (e) { console.error(e); }
   }, [user]);
 
-  // --- Handlers ---
-  const handleSetRole = (selectedRole) => {
-    setRole(selectedRole);
-    localStorage.setItem('couple_app_role', selectedRole);
-  };
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  const handleLogoutRole = () => {
-    openConfirm("登出確認", "切換身分後需要重新選擇，確定登出嗎？", () => {
-      localStorage.removeItem('couple_app_role');
-      setRole(null);
-      window.location.reload();
-    }, true);
-  };
-
-  // --- CRUD Operations ---
   const handleSaveTransaction = async (data) => {
     if (!user) return;
     try {
+      const finalAmount = Number(safeCalculate(data.amount));
+      const cleanData = { ...data, amount: finalAmount };
       if (editingTransaction) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), {
-          ...data, updatedAt: serverTimestamp()
-        });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
         showToast('紀錄已更新 ✨');
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
-          ...data, createdAt: serverTimestamp()
-        });
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...cleanData, createdAt: serverTimestamp() });
         showToast('紀錄已新增 🎉');
       }
       setShowAddTransaction(false);
       setEditingTransaction(null);
-    } catch (error) { console.error(error); }
+    } catch (e) { console.error(e); }
   };
 
   const handleDeleteTransaction = (id) => {
-    openConfirm("刪除紀錄", "確定要刪除這筆紀錄嗎？此動作無法復原。", async () => {
-      try {
+    setConfirmModal({
+      isOpen: true, title: "刪除紀錄", message: "確定要刪除這筆紀錄嗎？", isDanger: true,
+      onConfirm: async () => {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
-        showToast('紀錄已刪除 🗑️');
-      } catch (e) { console.error(e); }
-      closeConfirm();
-    }, true);
+        showToast('已刪除 🗑️');
+        setConfirmModal({ isOpen: false });
+      }
+    });
   };
 
   const handleSaveJar = async (name, target) => {
     if (!user) return;
     try {
+      const finalTarget = Number(safeCalculate(target));
       if (editingJar) {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), {
-           name, targetAmount: Number(target), updatedAt: serverTimestamp()
-         });
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), { name, targetAmount: finalTarget, updatedAt: serverTimestamp() });
          showToast('存錢罐已更新 ✨');
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), {
-          name, targetAmount: Number(target), currentAmount: 0, contributions: { bf: 0, gf: 0 }, createdAt: serverTimestamp()
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), { 
+            name, 
+            targetAmount: finalTarget, 
+            currentAmount: 0, 
+            contributions: { bf: 0, gf: 0 }, 
+            history: [], // Initialize empty history
+            createdAt: serverTimestamp() 
         });
         showToast('存錢罐已建立 🎯');
       }
@@ -260,244 +297,187 @@ export default function CoupleLedgerApp() {
   };
 
   const handleDeleteJar = (id) => {
-    openConfirm("打破存錢罐", "確定要刪除這個目標嗎？刪除後所有存錢紀錄也會消失。", async () => {
-      try {
+    setConfirmModal({
+      isOpen: true, title: "刪除目標", message: "確定要打破這個存錢罐嗎？", isDanger: true,
+      onConfirm: async () => {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', id));
-        showToast('存錢罐已刪除 🗑️');
-      } catch (e) { console.error(e); }
-      closeConfirm();
-    }, true);
-  }
+        showToast('已刪除 🗑️');
+        setConfirmModal({ isOpen: false });
+      }
+    });
+  };
 
   const depositToJar = async (jarId, amount, contributorRole) => {
     const jar = jars.find(j => j.id === jarId);
     if (!jar) return;
-    const newAmount = jar.currentAmount + Number(amount);
-    const newContrib = {
-      ...jar.contributions,
-      [contributorRole]: (jar.contributions?.[contributorRole] || 0) + Number(amount)
-    };
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jarId), {
-        currentAmount: newAmount, contributions: newContrib
+      const depositAmount = Number(safeCalculate(amount));
+      const newAmount = (jar.currentAmount || 0) + depositAmount;
+      const newContrib = { ...jar.contributions, [contributorRole]: (jar.contributions?.[contributorRole] || 0) + depositAmount };
+      
+      // Create new history item
+      const newHistoryItem = {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          amount: depositAmount,
+          role: contributorRole,
+          date: new Date().toISOString()
+      };
+      const newHistory = [newHistoryItem, ...(jar.history || [])];
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jarId), { 
+          currentAmount: newAmount, 
+          contributions: newContrib,
+          history: newHistory
       });
       setShowJarDeposit(null);
-      showToast('資金已存入 💰');
+      showToast(`已存入 $${depositAmount} 💰`);
     } catch (e) { console.error(e); }
   };
 
-  // --- Views ---
-  
-  if (!role) {
-    return (
-      <>
-        <style>{`
-          html, body { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-          * { box-sizing: border-box; }
-        `}</style>
-        <RoleSelection onSelect={handleSetRole} />
-      </>
-    );
-  }
+  // --- Jar History Operations ---
+  const handleUpdateJarHistoryItem = async (jar, oldItem, newAmount) => {
+    try {
+        const diff = Number(newAmount) - oldItem.amount;
+        const newTotal = (jar.currentAmount || 0) + diff;
+        const newContrib = { ...jar.contributions };
+        newContrib[oldItem.role] = (newContrib[oldItem.role] || 0) + diff;
+
+        const newHistory = (jar.history || []).map(item => 
+            item.id === oldItem.id ? { ...item, amount: Number(newAmount) } : item
+        );
+
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), {
+            currentAmount: newTotal,
+            contributions: newContrib,
+            history: newHistory
+        });
+        showToast('紀錄已修正 ✨');
+    } catch(e) { console.error(e); }
+  };
+
+  const handleDeleteJarHistoryItem = async (jar, item) => {
+    setConfirmModal({
+        isOpen: true, title: "刪除存錢紀錄", message: "確定要刪除這筆存款嗎？金額將會從總數扣除。", isDanger: true,
+        onConfirm: async () => {
+            try {
+                const newTotal = (jar.currentAmount || 0) - item.amount;
+                const newContrib = { ...jar.contributions };
+                newContrib[item.role] = Math.max(0, (newContrib[item.role] || 0) - item.amount);
+                
+                const newHistory = (jar.history || []).filter(h => h.id !== item.id);
+
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), {
+                    currentAmount: newTotal,
+                    contributions: newContrib,
+                    history: newHistory
+                });
+                showToast('紀錄已刪除 🗑️');
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            } catch(e) { console.error(e); }
+        }
+    });
+  };
+
+  if (loading) return <AppLoading />;
+  if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role', r); }} />;
 
   return (
-    // 使用 w-full 和 min-h-screen 確保全螢幕，移除 max-w-md 限制
-    <div className="min-h-screen w-full bg-gray-50 pb-20 font-sans text-gray-800">
-      <style>{`
-        /* Scrollbar Hiding */
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        /* Keyframes for animations */
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-      `}</style>
-
-      {/* Toast Notification */}
-      {toast && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-gray-900/90 backdrop-blur text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-[fadeIn_0.3s_ease-out]">
-          <CheckCircle size={20} className="text-green-400" />
-          <span className="font-medium text-sm whitespace-nowrap">{toast}</span>
-        </div>
-      )}
-
-      {/* Header - Full Width */}
-      <div className={`p-4 text-white shadow-md flex justify-between items-center transition-colors sticky top-0 z-40 ${role === 'bf' ? 'bg-blue-600' : 'bg-pink-500'}`}>
-        <div className="flex items-center gap-2">
-          <Heart className="fill-white animate-pulse" size={20} />
-          <h1 className="text-xl font-bold tracking-wide">我們的小金庫</h1>
-        </div>
-        <div className="flex items-center gap-2 text-sm bg-white/20 px-3 py-1 rounded-full backdrop-blur-sm">
-          <User size={14} />
-          <span>我是{role === 'bf' ? '男朋友' : '女朋友'}</span>
+    <div className="min-h-screen w-full bg-gray-50 font-sans text-gray-800 pb-24">
+      <style>{`.hide-scrollbar::-webkit-scrollbar { display: none; }`}</style>
+      <div className={`p-4 text-white shadow-lg sticky top-0 z-40 transition-colors ${role === 'bf' ? 'bg-blue-600' : 'bg-pink-500'}`}>
+        <div className="flex justify-between items-center max-w-2xl mx-auto">
+          <div className="flex items-center gap-2">
+            <div className="bg-white/20 p-2 rounded-full backdrop-blur-md"><Heart className="fill-white animate-pulse" size={18} /></div>
+            <h1 className="text-lg font-bold tracking-wide">我們的小金庫</h1>
+          </div>
+          <div className="text-xs bg-black/10 px-3 py-1 rounded-full">{role === 'bf' ? '👦 男朋友' : '👧 女朋友'}</div>
         </div>
       </div>
 
-      {/* Main Content Area - Full Width Container */}
-      <div className="p-4 w-full max-w-4xl mx-auto">
-        {activeTab === 'overview' && (
-          <Overview 
-            transactions={transactions} 
-            role={role} 
-            onAdd={() => {
-              setEditingTransaction(null);
-              setShowAddTransaction(true);
-            }}
-            onEdit={(t) => {
-              setEditingTransaction(t);
-              setShowAddTransaction(true);
-            }}
-            onDelete={handleDeleteTransaction}
-          />
-        )}
-        {activeTab === 'stats' && (
-          <Statistics transactions={transactions} />
-        )}
-        {activeTab === 'savings' && (
-          <Savings 
-            jars={jars} 
-            role={role} 
-            onAdd={() => {
-              setEditingJar(null);
-              setShowAddJar(true);
-            }}
-            onEdit={(j) => {
-               setEditingJar(j);
-               setShowAddJar(true);
-            }}
-            onDeposit={(id) => setShowJarDeposit(id)}
-            onDelete={handleDeleteJar}
-          />
-        )}
-        {activeTab === 'settings' && (
-          <SettingsView role={role} onLogout={handleLogoutRole} />
-        )}
+      <div className="max-w-2xl mx-auto p-4">
+        {activeTab === 'overview' && <Overview transactions={transactions} role={role} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onEdit={(t) => { setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={handleDeleteTransaction} />}
+        {activeTab === 'stats' && <Statistics transactions={transactions} />}
+        {activeTab === 'savings' && <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j)} />}
+        {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
 
-      {/* Bottom Navigation - Fixed Bottom Full Width */}
-      <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 z-50 text-xs shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-        <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
-        <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
-        <NavBtn icon={PiggyBank} label="存錢罐" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
-        <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
+      <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50">
+        <div className="flex justify-around py-3 max-w-2xl mx-auto">
+          <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
+          <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
+          <NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
+          <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
+        </div>
       </div>
 
-      {/* Modals Layer */}
-      {showAddTransaction && (
-        <AddTransactionModal 
-          onClose={() => setShowAddTransaction(false)} 
-          onSave={handleSaveTransaction} 
-          currentUserRole={role}
-          initialData={editingTransaction}
-        />
-      )}
-      {showAddJar && (
-        <AddJarModal 
-          onClose={() => setShowAddJar(false)} 
-          onSave={handleSaveJar} 
-          initialData={editingJar}
-        />
-      )}
-      {showJarDeposit && (
-        <DepositModal 
-          jar={jars.find(j => j.id === showJarDeposit)}
-          onClose={() => setShowJarDeposit(null)}
-          onConfirm={depositToJar}
-          role={role}
-        />
-      )}
+      {toast && <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-[fadeIn_0.3s_ease-out]"><CheckCircle size={18} className="text-green-400" /><span className="text-sm font-medium">{toast}</span></div>}
 
-      {/* Custom Confirmation Modal */}
       {confirmModal.isOpen && (
-        <ConfirmationModal 
-          title={confirmModal.title}
-          message={confirmModal.message}
-          isDanger={confirmModal.isDanger}
-          onConfirm={confirmModal.onConfirm}
-          onCancel={closeConfirm}
-        />
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s]"
+          onClick={(e) => {
+            // Click outside to close confirm modal
+            if (e.target === e.currentTarget) setConfirmModal(prev => ({ ...prev, isOpen: false }));
+          }}
+        >
+          <div className="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
+            <p className="text-gray-500 text-sm mb-6">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmModal({ isOpen: false })} className="flex-1 py-3 bg-gray-100 rounded-xl text-sm font-bold text-gray-600">取消</button>
+              <button onClick={confirmModal.onConfirm} className={`flex-1 py-3 rounded-xl text-sm font-bold text-white ${confirmModal.isDanger ? 'bg-red-500' : 'bg-blue-500'}`}>確定</button>
+            </div>
+          </div>
+        </div>
       )}
+
+      {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
+      {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} />}
+      {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
+      {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
     </div>
   );
 }
 
 // --- Sub-Components ---
-
-const NavBtn = ({ icon: Icon, label, active, onClick, role }) => {
-  const activeColor = role === 'bf' ? 'text-blue-600' : 'text-pink-600';
-  return (
-    <button 
-      onClick={onClick} 
-      className={`flex flex-col items-center gap-1 w-full ${active ? activeColor : 'text-gray-400'}`}
-    >
-      <Icon size={24} strokeWidth={active ? 2.5 : 2} />
-      <span className={active ? 'font-medium' : ''}>{label}</span>
-    </button>
-  );
-};
+const NavBtn = ({ icon: Icon, label, active, onClick, role }) => (
+  <button onClick={onClick} className={`flex flex-col items-center gap-1 w-full ${active ? (role === 'bf' ? 'text-blue-600' : 'text-pink-600') : 'text-gray-400'}`}>
+    <Icon size={24} strokeWidth={active ? 2.5 : 2} />
+    <span className="text-[10px] font-medium">{label}</span>
+  </button>
+);
 
 const RoleSelection = ({ onSelect }) => (
-  <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-pink-100 to-blue-100 p-6">
-    <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center space-y-8 animate-[zoomIn_0.5s_ease-out]">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">歡迎回來</h1>
-        <p className="text-gray-500">請確認您的身分以繼續</p>
-      </div>
-      
+  <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+    <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
+      <h1 className="text-2xl font-bold text-gray-800 mb-6">歡迎使用小金庫</h1>
       <div className="space-y-4">
-        <button 
-          onClick={() => onSelect('bf')}
-          className="w-full py-4 px-6 bg-blue-500 hover:bg-blue-600 text-white rounded-2xl flex items-center justify-between transition-transform transform hover:scale-105 shadow-lg"
-        >
-          <span className="text-lg font-bold">我是男朋友 👦</span>
-          <ArrowRightLeft size={20} className="opacity-50" />
-        </button>
-        <button 
-          onClick={() => onSelect('gf')}
-          className="w-full py-4 px-6 bg-pink-500 hover:bg-pink-600 text-white rounded-2xl flex items-center justify-between transition-transform transform hover:scale-105 shadow-lg"
-        >
-          <span className="text-lg font-bold">我是女朋友 👧</span>
-          <ArrowRightLeft size={20} className="opacity-50" />
-        </button>
-      </div>
-      <p className="text-xs text-gray-400">選擇後將會綁定此裝置</p>
-    </div>
-  </div>
-);
-
-const ConfirmationModal = ({ title, message, onConfirm, onCancel, isDanger }) => (
-  <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/40 backdrop-blur-[2px] animate-[fadeIn_0.2s_ease-out]">
-    <div className="bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl scale-100 animate-[zoomIn_0.2s_ease-out]">
-      <div className="flex flex-col items-center text-center mb-6">
-        <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isDanger ? 'bg-red-100 text-red-500' : 'bg-blue-100 text-blue-500'}`}>
-          <AlertTriangle size={24} />
-        </div>
-        <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-        <p className="text-sm text-gray-500 mt-2">{message}</p>
-      </div>
-      <div className="flex gap-3">
-        <button onClick={onCancel} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold text-sm transition-colors">取消</button>
-        <button onClick={onConfirm} className={`flex-1 py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-transform active:scale-95 ${isDanger ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'}`}>確定</button>
+        <button onClick={() => onSelect('bf')} className="w-full py-4 bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">我是男朋友 👦</button>
+        <button onClick={() => onSelect('gf')} className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold shadow-lg shadow-pink-200 active:scale-95 transition-transform">我是女朋友 👧</button>
       </div>
     </div>
   </div>
 );
 
-const Overview = ({ transactions, role, onAdd, onDelete, onEdit }) => {
-  const debtSummary = useMemo(() => {
-    let bfLent = 0; 
+// --- Overview Component ---
+const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
+  const debt = useMemo(() => {
+    let bfLent = 0;
     transactions.forEach(t => {
-      const amount = Number(t.amount);
+      const amt = Number(t.amount) || 0;
       if (t.category === 'repayment') {
-        if (t.paidBy === 'bf') bfLent -= amount; else bfLent += amount; 
+        t.paidBy === 'bf' ? bfLent -= amt : bfLent += amt;
       } else {
         let gfShare = 0, bfShare = 0;
-        if (t.splitDetails) { gfShare = Number(t.splitDetails.gf); bfShare = Number(t.splitDetails.bf); } 
-        else {
-          if (t.splitType === 'shared') { gfShare = amount / 2; bfShare = amount / 2; }
-          else if (t.splitType === 'gf_personal') { gfShare = amount; bfShare = 0; }
-          else if (t.splitType === 'bf_personal') { gfShare = 0; bfShare = amount; }
+        if (t.splitType === 'custom' && t.splitDetails) {
+            gfShare = Number(t.splitDetails.gf) || 0;
+            bfShare = Number(t.splitDetails.bf) || 0;
+        } else if (t.splitType === 'shared') { 
+            gfShare = amt / 2; bfShare = amt / 2; 
+        } else if (t.splitType === 'gf_personal') { 
+            gfShare = amt; 
+        } else if (t.splitType === 'bf_personal') { 
+            bfShare = amt; 
         }
         if (t.paidBy === 'bf') bfLent += gfShare; else bfLent -= bfShare;
       }
@@ -505,317 +485,218 @@ const Overview = ({ transactions, role, onAdd, onDelete, onEdit }) => {
     return bfLent;
   }, [transactions]);
 
-  const monthlyExpense = useMemo(() => {
-    const now = new Date();
-    return transactions.filter(t => {
-      const d = new Date(t.date);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && t.category !== 'repayment';
-    }).reduce((acc, curr) => acc + Number(curr.amount), 0);
+  const grouped = useMemo(() => {
+    const groups = {};
+    transactions.forEach(t => { if (!t.date) return; if (!groups[t.date]) groups[t.date] = []; groups[t.date].push(t); });
+    return Object.entries(groups).sort((a, b) => new Date(b[0]) - new Date(a[0]));
   }, [transactions]);
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400"></div>
-        <h2 className="text-gray-500 text-sm mb-2 font-medium">當前債務關係</h2>
-        <div className="flex items-center justify-center gap-3">
-          {Math.abs(debtSummary) < 1 ? (
-             <div className="text-2xl font-bold text-green-500 flex items-center gap-2"><Check size={24} /> 互不相欠</div>
-          ) : (
-            <>
-              <span className={`text-xl font-bold ${debtSummary > 0 ? 'text-pink-500' : 'text-blue-500'}`}>{debtSummary > 0 ? '女朋友' : '男朋友'}</span>
-              <span className="text-gray-400 text-sm">欠</span>
-              <span className={`text-xl font-bold ${debtSummary > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debtSummary > 0 ? '男朋友' : '女朋友'}</span>
-              <div className="text-3xl font-extrabold text-gray-800 ml-2">{formatMoney(Math.abs(debtSummary))}</div>
-            </>
-          )}
-        </div>
-        {Math.abs(debtSummary) > 0 && (
-           <p className="text-xs text-gray-400 mt-2">{debtSummary > 0 && role === 'gf' ? "記得還錢喔！" : ""}{debtSummary < 0 && role === 'bf' ? "記得還錢喔！" : ""}</p>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 text-gray-500 mb-1"><Calendar size={16} /><span className="text-xs">本月總支出</span></div>
-          <div className="text-xl font-bold text-gray-800">{formatMoney(monthlyExpense)}</div>
-        </div>
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center items-center cursor-pointer hover:bg-gray-50 transition-colors" onClick={onAdd}>
-          <div className={`p-3 rounded-full mb-2 ${role === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}><Plus size={24} /></div>
-          <span className="text-sm font-medium text-gray-600">記一筆</span>
+        <div className={`absolute top-0 left-0 w-full h-1 ${Math.abs(debt) < 1 ? 'bg-green-400' : (debt > 0 ? 'bg-blue-400' : 'bg-pink-400')}`}></div>
+        <h2 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">當前狀態</h2>
+        <div className="flex items-center justify-center gap-2">
+          {Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500 flex items-center gap-2"><CheckCircle /> 互不相欠</div> : <><span className={`text-3xl font-black ${debt > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debt > 0 ? '男朋友' : '女朋友'}</span><span className="text-gray-400 text-sm">先墊了</span><span className="text-2xl font-bold text-gray-800">{formatMoney(Math.abs(debt))}</span></>}
         </div>
       </div>
 
-      <div>
-        <h3 className="text-lg font-bold text-gray-800 mb-3 ml-1">最近紀錄</h3>
-        <div className="space-y-3">
-          {transactions.length === 0 ? (
-            <div className="text-center py-10 text-gray-400 bg-white rounded-2xl">尚無紀錄，開始記帳吧！</div>
-          ) : (
-            transactions.map(t => (
-              <div key={t.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center group">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-lg shrink-0`} style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>
-                     {t.category === 'repayment' ? <RefreshCw size={18} /> : (CATEGORIES.find(c => c.id === t.category)?.name[0] || '?')}
+      <div className="space-y-4">
+        <div className="flex justify-between items-end px-2"><h3 className="font-bold text-lg text-gray-800">最近紀錄</h3><button onClick={onAdd} className="bg-gray-900 text-white p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform"><Plus size={20} /></button></div>
+        {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">還沒有記帳紀錄喔</div> : grouped.map(([date, items]) => (
+            <div key={date} className="space-y-2">
+              <div className="text-xs font-bold text-gray-400 ml-2 bg-gray-100 inline-block px-2 py-1 rounded-md">{date}</div>
+              {items.map(t => (
+                <div key={t.id} onClick={() => onEdit(t)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between active:bg-gray-50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
+                    <div><div className="font-bold text-gray-800">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div><div className="text-xs text-gray-400 flex gap-1"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>{t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : '自訂分帳'))}</span></div></div>
                   </div>
-                  <div>
-                    <div className="font-bold text-gray-800">{t.note || CATEGORIES.find(c => c.id === t.category)?.name}</div>
-                    <div className="text-xs text-gray-400 flex gap-2">
-                      <span>{t.date}</span><span>•</span>
-                      <span className={`${t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}`}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span>
-                      <span>•</span>
-                      <span>{t.category === 'repayment' ? '還款' : (t.splitDetails ? (t.splitDetails.bf > 0 && t.splitDetails.gf > 0 ? '分帳' : t.splitDetails.bf > 0 ? '男友個人' : '女友個人') : '一般支出')}</span>
-                    </div>
-                  </div>
+                  <div className="flex items-center gap-3"><span className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{formatMoney(t.amount)}</span><button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="text-gray-300 hover:text-red-400 p-1"><Trash2 size={16} /></button></div>
                 </div>
-                <div className="flex items-center gap-3">
-                   <div className="text-right">
-                     <span className={`font-bold block ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{t.category === 'repayment' ? '+' : '-'}{formatMoney(t.amount)}</span>
-                     {t.splitDetails && t.category !== 'repayment' && ( <span className="text-[10px] text-gray-400 block">(B:{formatMoney(t.splitDetails.bf)} G:{formatMoney(t.splitDetails.gf)})</span> )}
-                   </div>
-                   <div className="flex gap-1">
-                     <button onClick={() => onEdit(t)} className="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-full transition-colors"><Pencil size={16} /></button>
-                     <button onClick={() => onDelete(t.id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={16} /></button>
-                   </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+              ))}
+            </div>
+          ))}
       </div>
     </div>
   );
 };
 
 const Statistics = ({ transactions }) => {
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
-
-  const handlePrevMonth = () => { if (month === 1) { setMonth(12); setYear(y => y - 1); } else { setMonth(m => m - 1); } };
-  const handleNextMonth = () => { if (month === 12) { setMonth(1); setYear(y => y + 1); } else { setMonth(m => m + 1); } };
-
-  const statsData = useMemo(() => {
-    const filtered = transactions.filter(t => {
-      const d = new Date(t.date);
-      return t.category !== 'repayment' && d.getFullYear() === year && (d.getMonth() + 1) === month;
-    });
-    const categoryMap = {};
-    filtered.forEach(t => { categoryMap[t.category] = (categoryMap[t.category] || 0) + Number(t.amount); });
-    return Object.entries(categoryMap).map(([id, value]) => ({
-        name: CATEGORIES.find(c => c.id === id)?.name || id,
-        value,
-        color: CATEGORIES.find(c => c.id === id)?.color || '#999'
-      })).sort((a, b) => b.value - a.value);
-  }, [transactions, year, month]);
-
-  const total = statsData.reduce((acc, curr) => acc + curr.value, 0);
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const monthTransactions = useMemo(() => transactions.filter(t => { const d = new Date(t.date); return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear() && t.category !== 'repayment'; }), [transactions, currentDate]);
+  const chartData = useMemo(() => {
+    const map = {}; let total = 0;
+    monthTransactions.forEach(t => { const amt = Number(t.amount) || 0; if (!map[t.category]) map[t.category] = 0; map[t.category] += amt; total += amt; });
+    return { data: Object.entries(map).map(([id, value]) => ({ id, value, color: CATEGORIES.find(c => c.id === id)?.color || '#999', name: CATEGORIES.find(c => c.id === id)?.name || '未知' })).sort((a, b) => b.value - a.value), total };
+  }, [monthTransactions]);
+  const changeMonth = (delta) => { const newDate = new Date(currentDate); newDate.setMonth(newDate.getMonth() + delta); setCurrentDate(newDate); };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm">
-        <button onClick={handlePrevMonth} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><Minus size={16} /></button>
-        <div className="font-bold text-lg">{year}年 {month}月</div>
-        <button onClick={handleNextMonth} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><Plus size={16} /></button>
+    <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm">
+        <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronLeft /></button>
+        <span className="font-bold text-lg">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</span>
+        <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight /></button>
       </div>
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center">
-        <h3 className="text-gray-500 mb-4">月支出分佈</h3>
-        <div className="w-full"><SimpleDonutChart data={statsData} total={total} /></div>
+        <SimpleDonutChart data={chartData.data} total={chartData.total} />
+        <div className="flex flex-wrap gap-2 justify-center mt-4">{chartData.data.map(d => (<div key={d.id} className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-50 border border-gray-100"><div className="w-2 h-2 rounded-full" style={{ background: d.color }}></div><span>{d.name}</span><span className="font-bold">{chartData.total ? Math.round(d.value / chartData.total * 100) : 0}%</span></div>))}</div>
       </div>
-      <div className="space-y-2">
-        {statsData.map((item, idx) => (
-          <div key={idx} className="bg-white p-3 rounded-xl flex justify-between items-center shadow-sm">
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div><span className="font-medium">{item.name}</span></div>
-            <div className="flex items-center gap-4"><span className="text-gray-800 font-bold">{formatMoney(item.value)}</span><span className="text-gray-400 text-xs w-10 text-right">{((item.value / total) * 100).toFixed(0)}%</span></div>
-          </div>
-        ))}
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2"><Calendar size={18} className="text-gray-400"/><h3 className="font-bold text-gray-700">本月詳細紀錄</h3></div>
+        <div className="divide-y divide-gray-100">{monthTransactions.length === 0 ? <div className="p-8 text-center text-gray-400 text-sm">尚無消費紀錄</div> : monthTransactions.map(t => (<div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50"><div className="flex items-center gap-3"><div className="text-gray-400 text-xs font-mono w-10 text-center bg-gray-100 rounded p-1">{t.date ? `${t.date.split('-')[1]}/${t.date.split('-')[2]}` : '--/--'}</div><div><div className="font-bold text-sm text-gray-800">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div><div className="text-xs text-gray-400" style={{ color: CATEGORIES.find(c => c.id === t.category)?.color }}>{CATEGORIES.find(c => c.id === t.category)?.name || '其他'}</div></div></div><div className="font-bold text-gray-700">{formatMoney(t.amount)}</div></div>))}</div>
       </div>
     </div>
   );
 };
 
-const Savings = ({ jars, role, onAdd, onDeposit, onDelete, onEdit }) => {
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center mb-2">
-        <h2 className="text-xl font-bold">存錢目標</h2>
-        <button onClick={onAdd} className="flex items-center gap-1 bg-gradient-to-r from-teal-400 to-emerald-400 text-white px-4 py-2 rounded-full shadow-md text-sm font-bold active:scale-95 transition-transform"><Plus size={16} /> 新增罐子</button>
-      </div>
-      {jars.length === 0 && (
-         <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-gray-200"><PiggyBank size={48} className="mx-auto text-gray-300 mb-4" /><p className="text-gray-400">還沒有存錢罐，一起設立一個夢想吧！</p></div>
-      )}
-      {jars.map(jar => {
-        const progress = Math.min((jar.currentAmount / jar.targetAmount) * 100, 100);
-        return (
-          <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative group overflow-hidden">
-             <div className="absolute top-4 right-4 flex gap-2 z-10">
-               <button onClick={(e) => { e.stopPropagation(); onEdit(jar); }} className="p-1.5 bg-white/80 hover:bg-blue-100 text-gray-400 hover:text-blue-500 rounded-full transition-colors shadow-sm"><Pencil size={16} /></button>
-               <button onClick={(e) => { e.stopPropagation(); onDelete(jar.id); }} className="p-1.5 bg-white/80 hover:bg-red-100 text-gray-400 hover:text-red-500 rounded-full transition-colors shadow-sm"><Trash2 size={16} /></button>
-             </div>
-             <div className="flex items-center gap-4 mb-4">
-               <div className="bg-yellow-100 p-3 rounded-2xl text-yellow-600"><Target size={24} /></div>
-               <div><h3 className="font-bold text-lg text-gray-800">{jar.name}</h3><div className="text-xs text-gray-400 flex gap-2"><span>目標: {formatMoney(jar.targetAmount)}</span></div></div>
-             </div>
-             <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden mb-3">
-               <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-yellow-300 to-orange-400 transition-all duration-1000 ease-out" style={{ width: `${progress}%` }}></div>
-             </div>
-             <div className="flex justify-between items-end">
-                <div>
-                   <div className="text-2xl font-bold text-gray-800">{formatMoney(jar.currentAmount)}</div>
-                   <div className="text-xs text-gray-400 mt-1 flex gap-2"><span className="text-blue-500">👦 {formatMoney(jar.contributions?.bf || 0)}</span><span className="text-pink-500">👧 {formatMoney(jar.contributions?.gf || 0)}</span></div>
-                </div>
-                <button onClick={() => onDeposit(jar.id)} className="bg-gray-800 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform">存入</button>
-             </div>
-          </div>
-        )
-      })}
+const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) => (
+  <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+    <div className="flex justify-between items-center px-2">
+      <h2 className="font-bold text-xl text-gray-800">存錢目標</h2>
+      <button onClick={onAdd} className="bg-gray-900 text-white p-2 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 text-sm font-bold pr-4"><Plus size={18} /> 新增目標</button>
     </div>
-  );
-};
+    <div className="grid gap-4">
+      {jars.map(jar => {
+        const cur = Number(jar.currentAmount) || 0; const tgt = Number(jar.targetAmount) || 1; const progress = Math.min((cur / tgt) * 100, 100);
+        return (
+          <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative overflow-hidden group">
+            <div className="flex justify-between items-start mb-4 relative z-10"><div><h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">{jar.name}<button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500"><Pencil size={14}/></button></h3><div className="text-xs text-gray-400 mt-1">目標 {formatMoney(tgt)}</div></div><div className="bg-yellow-100 text-yellow-700 font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1"><Target size={12} /> {Math.round(progress)}%</div></div>
+            <div className="mb-4 relative z-10"><div className="text-3xl font-black text-gray-800 mb-1">{formatMoney(cur)}</div><div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-yellow-300 to-orange-400 transition-all duration-1000" style={{ width: `${progress}%` }}></div></div></div>
+            <div className="flex justify-between items-center relative z-10">
+                <div className="flex -space-x-2"><div className="w-8 h-8 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-[10px] text-blue-600 font-bold" title="男友貢獻">{Math.round((jar.contributions?.bf || 0) / (cur || 1) * 100)}%</div><div className="w-8 h-8 rounded-full bg-pink-100 border-2 border-white flex items-center justify-center text-[10px] text-pink-600 font-bold" title="女友貢獻">{Math.round((jar.contributions?.gf || 0) / (cur || 1) * 100)}%</div></div>
+                <div className="flex gap-2">
+                    <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button>
+                    <button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>
+                    <button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button>
+                </div>
+            </div>
+            <PiggyBank className="absolute -bottom-4 -right-4 text-gray-50 opacity-50 z-0 transform -rotate-12" size={120} />
+          </div>
+        );
+      })}
+      {jars.length === 0 && <div className="text-center py-10 text-gray-400">還沒有存錢計畫，快來建立一個！</div>}
+    </div>
+  </div>
+);
 
 const SettingsView = ({ role, onLogout }) => (
-  <div className="space-y-4">
-    <div className="bg-white p-6 rounded-3xl shadow-sm">
-       <h2 className="text-xl font-bold mb-4">設定</h2>
-       <div className="flex items-center gap-4 mb-6">
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white text-xl ${role === 'bf' ? 'bg-blue-500' : 'bg-pink-500'}`}>{role === 'bf' ? 'BF' : 'GF'}</div>
-          <div><div className="font-bold">當前身分：{role === 'bf' ? '男朋友' : '女朋友'}</div><div className="text-xs text-gray-400">ID: {localStorage.getItem('couple_app_role')}</div></div>
-       </div>
-       <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-medium flex items-center justify-center gap-2"><LogOut size={18} /> 重選身分 / 登出</button>
+  <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+      <div className="flex items-center gap-4 mb-6"><div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl ${role === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>{role === 'bf' ? '👦' : '👧'}</div><div><h2 className="font-bold text-xl">{role === 'bf' ? '男朋友' : '女朋友'}</h2><p className="text-gray-400 text-sm">目前身分</p></div></div>
+      <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2"><LogOut size={18} /> 切換身分 (登出)</button>
     </div>
-    <div className="bg-white p-6 rounded-3xl shadow-sm text-center"><p className="text-gray-400 text-sm">我們的小金庫 v1.9</p><p className="text-gray-300 text-xs mt-2">Designed for Couples</p></div>
+  </div>
+);
+
+// --- Modals ---
+const ModalLayout = ({ title, onClose, children }) => (
+  <div 
+    className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]"
+    onClick={(e) => {
+      // Click outside (background) to close
+      if (e.target === e.currentTarget) onClose();
+    }}
+  >
+    <div className="bg-white w-full sm:max-w-md h-auto max-h-[90vh] sm:rounded-3xl rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-[slideUp_0.3s_ease-out]">
+      <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
+        <h2 className="text-base font-bold text-gray-800">{title}</h2>
+        <button onClick={onClose} className="bg-gray-50 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={18} /></button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 hide-scrollbar">{children}</div>
+    </div>
   </div>
 );
 
 const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) => {
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
-  const [category, setCategory] = useState('food');
-  const [payer, setPayer] = useState(currentUserRole); 
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [isRepayment, setIsRepayment] = useState(false);
-  const [splitMode, setSplitMode] = useState('equal'); 
-  const [bfAmount, setBfAmount] = useState(''); 
-  const [gfAmount, setGfAmount] = useState(''); 
-  const [bfPercent, setBfPercent] = useState(50); 
+  const [amount, setAmount] = useState(initialData?.amount?.toString() || '');
+  const [note, setNote] = useState(initialData?.note || '');
+  const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
+  const [category, setCategory] = useState(initialData?.category || 'food');
+  const [paidBy, setPaidBy] = useState(initialData?.paidBy || currentUserRole);
+  const [splitType, setSplitType] = useState(initialData?.splitType || 'shared');
+  
+  const [customBf, setCustomBf] = useState(initialData?.splitDetails?.bf || '');
+  const [customGf, setCustomGf] = useState(initialData?.splitDetails?.gf || '');
+
+  const scrollRef = useRef(null);
+  const scroll = (offset) => { if(scrollRef.current) scrollRef.current.scrollBy({ left: offset, behavior: 'smooth' }); };
 
   useEffect(() => {
-    if (initialData) {
-      setAmount(initialData.amount.toString());
-      setNote(initialData.note || '');
-      setCategory(initialData.category);
-      setPayer(initialData.paidBy);
-      setDate(initialData.date);
-      const isRepay = initialData.category === 'repayment';
-      setIsRepayment(isRepay);
-      if (!isRepay) {
-         if (initialData.splitType === 'custom_amount') { setSplitMode('amount'); setBfAmount(initialData.splitDetails?.bf || 0); setGfAmount(initialData.splitDetails?.gf || 0); } 
-         else if (initialData.splitType === 'custom_percent') { setSplitMode('percent'); const total = Number(initialData.amount); const bf = initialData.splitDetails?.bf || 0; setBfPercent(Math.round((bf / total) * 100)); } 
-         else if (initialData.splitType === 'bf_personal') { setSplitMode('amount'); setBfAmount(initialData.amount); setGfAmount(0); } 
-         else if (initialData.splitType === 'gf_personal') { setSplitMode('amount'); setBfAmount(0); setGfAmount(initialData.amount); } 
-         else { setSplitMode('equal'); }
-      }
-    }
-  }, [initialData]);
+    if (splitType === 'custom' && amount && !isNaN(amount)) { }
+  }, [amount, splitType]);
 
-  useEffect(() => {
-    const total = Number(amount) || 0;
-    if (splitMode === 'amount') {
-      if (bfAmount !== '' && gfAmount !== '') { const currentTotal = Number(bfAmount) + Number(gfAmount); if (currentTotal !== total) { setBfAmount(total/2); setGfAmount(total/2); } } 
-      else { setBfAmount(total / 2); setGfAmount(total / 2); }
-    }
-  }, [amount]); 
+  const handleCustomChange = (who, val) => {
+    const numVal = Number(val);
+    const total = Number(safeCalculate(amount)) || 0;
+    if (who === 'bf') { setCustomBf(val); setCustomGf((total - numVal).toString()); } 
+    else { setCustomGf(val); setCustomBf((total - numVal).toString()); }
+  };
 
-  const handleSubmit = () => {
-    if (!amount) return;
-    const total = Number(amount);
-    let splitDetails = { bf: 0, gf: 0 };
-    let splitType = splitMode; 
-    if (isRepayment) { splitType = 'repayment'; } 
-    else {
-      if (splitMode === 'equal') { splitDetails = { bf: total / 2, gf: total / 2 }; splitType = 'shared'; } 
-      else if (splitMode === 'percent') { const bf = Math.round(total * (bfPercent / 100)); splitDetails = { bf: bf, gf: total - bf }; splitType = 'custom_percent'; } 
-      else if (splitMode === 'amount') {
-        const bf = Number(bfAmount); const gf = Number(gfAmount);
-        if (Math.abs(bf + gf - total) > 1) { alert(`分帳金額總和 (${bf+gf}) 必須等於總支出金額 (${total})`); return; }
-        splitDetails = { bf, gf }; splitType = 'custom_amount';
-      }
-    }
-    onSave({ amount: total, note: isRepayment ? '還款' : note, category: isRepayment ? 'repayment' : category, paidBy: payer, splitType, splitDetails, date });
+  const handleSubmit = (finalAmount) => {
+    if (!finalAmount || finalAmount === '0' || isNaN(Number(finalAmount))) return;
+    const payload = { amount: finalAmount, note, date, category, paidBy, splitType, updatedAt: serverTimestamp() };
+    if (splitType === 'custom') { payload.splitDetails = { bf: Number(customBf) || 0, gf: Number(customGf) || 0 }; }
+    onSave(payload);
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-[slideInUp_0.3s_ease-out] h-[85vh] sm:h-auto overflow-y-auto">
-        <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold">{initialData ? '編輯紀錄' : (isRepayment ? '還款給對方' : '記一筆')}</h3><button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button></div>
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs text-gray-400 font-bold ml-1">金額</label>
-            <div className="relative"><DollarSign size={20} className="absolute left-3 top-3 text-gray-400" /><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-gray-50 p-3 pl-10 rounded-xl text-2xl font-bold outline-none focus:ring-2 focus:ring-blue-100" placeholder="0" autoFocus={!initialData} /></div>
-          </div>
-          {!initialData && (
-            <div className="flex gap-2 p-1 bg-gray-100 rounded-xl"><button onClick={() => setIsRepayment(false)} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${!isRepayment ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400'}`}>一般支出</button><button onClick={() => { setIsRepayment(true); setCategory('repayment'); }} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${isRepayment ? 'bg-white shadow-sm text-green-600' : 'text-gray-400'}`}>債務還款</button></div>
-          )}
-          {!isRepayment && (
-            <>
-              <div>
-                <label className="text-xs text-gray-400 font-bold ml-1">分類</label>
-                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                  {CATEGORIES.filter(c => c.id !== 'repayment').map(c => (
-                    <button key={c.id} onClick={() => setCategory(c.id)} className={`flex flex-col items-center gap-1 min-w-[60px] p-2 rounded-xl transition-all ${category === c.id ? 'bg-gray-800 text-white scale-105' : 'bg-gray-50 text-gray-500'}`}><div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: category === c.id ? 'rgba(255,255,255,0.2)' : c.color }}><span className="text-white text-xs">{c.name[0]}</span></div><span className="text-xs">{c.name}</span></button>
-                  ))}
-                </div>
-              </div>
-              <input type="text" value={note} onChange={(e) => setNote(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-100" placeholder="備註 (選填)" />
-              
-              {/* Payer Section: Full width now to prevent squishing */}
-              <div>
-                 <label className="text-xs text-gray-400 font-bold ml-1 mb-1 block">誰付錢？</label>
-                 <div className="flex gap-2">
-                    <button onClick={() => setPayer('bf')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${payer === 'bf' ? 'bg-blue-50 border-blue-500 text-blue-600' : 'border-gray-100 text-gray-400'}`}>男友</button>
-                    <button onClick={() => setPayer('gf')} className={`flex-1 py-2.5 rounded-xl text-sm font-bold border-2 transition-colors ${payer === 'gf' ? 'bg-pink-50 border-pink-500 text-pink-600' : 'border-gray-100 text-gray-400'}`}>女友</button>
-                 </div>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                <label className="text-xs text-gray-400 font-bold mb-2 block">分帳設定</label>
-                <div className="flex gap-1 bg-gray-200 p-1 rounded-lg mb-4">{['equal', 'percent', 'amount'].map(m => (<button key={m} onClick={() => setSplitMode(m)} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${splitMode === m ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`}>{m === 'equal' ? '均分' : m === 'percent' ? '比例' : '金額'}</button>))}</div>
-                {splitMode === 'equal' && (<div className="flex gap-2"><button onClick={() => { setSplitMode('amount'); setBfAmount(Number(amount)); setGfAmount(0); }} className="flex-1 py-2 border border-blue-200 text-blue-500 rounded-lg text-xs font-bold hover:bg-blue-50">男友全出</button><button onClick={() => { setSplitMode('amount'); setBfAmount(0); setGfAmount(Number(amount)); }} className="flex-1 py-2 border border-pink-200 text-pink-500 rounded-lg text-xs font-bold hover:bg-pink-50">女友全出</button></div>)}
-                {splitMode === 'amount' && (<div className="flex gap-3"><input type="number" value={bfAmount} onChange={(e) => { setBfAmount(e.target.value); setGfAmount(Number(amount)-e.target.value); }} className="flex-1 min-w-0 p-2 bg-white border border-gray-200 rounded-lg text-sm text-center font-bold" /><input type="number" value={gfAmount} onChange={(e) => { setGfAmount(e.target.value); setBfAmount(Number(amount)-e.target.value); }} className="flex-1 min-w-0 p-2 bg-white border border-gray-200 rounded-lg text-sm text-center font-bold" /></div>)}
-                {splitMode === 'percent' && (
-                  <div className="space-y-3">
-                    <div className="flex justify-between text-xs font-bold"><span className="text-blue-500">男友 {bfPercent}%</span><span className="text-pink-500">女友 {100 - bfPercent}%</span></div>
-                    <input type="range" min="0" max="100" step="5" value={bfPercent} onChange={(e) => setBfPercent(Number(e.target.value))} className="w-full accent-gray-800 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-gray-50 p-2 rounded-xl text-gray-500 text-sm text-center mt-2" />
-          <button onClick={handleSubmit} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-transform mt-4">{initialData ? '儲存修改' : (isRepayment ? '確認還款' : '儲存紀錄')}</button>
+    <ModalLayout title={initialData ? "編輯紀錄" : "記一筆"} onClose={onClose}>
+      <div className="space-y-3 pb-2">
+        <div className="bg-gray-50 p-2 rounded-xl text-center border-2 border-transparent focus-within:border-blue-200 transition-colors">
+          <div className="text-3xl font-black text-gray-800 tracking-wider h-9 flex items-center justify-center overflow-hidden">{amount ? amount : <span className="text-gray-300">0</span>}</div>
         </div>
+        <div className="flex gap-2">
+           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 border-none rounded-xl p-2 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none w-1/3" />
+           <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="備註 (例如: 晚餐)" className="bg-gray-50 border-none rounded-xl p-2 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none flex-1" />
+        </div>
+        
+        {/* Categories Scrollable */}
+        <div className="relative group">
+            <button onClick={() => scroll(-100)} className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 p-1 rounded-full shadow-md text-gray-600 hidden group-hover:block hover:bg-white"><ChevronLeft size={16}/></button>
+            <div ref={scrollRef} className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar scroll-smooth">
+                {CATEGORIES.map(c => (
+                <button key={c.id} onClick={() => setCategory(c.id)} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all border-2 whitespace-nowrap ${category === c.id ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-100 bg-white text-gray-500'}`}>{c.name}</button>
+                ))}
+            </div>
+            <button onClick={() => scroll(100)} className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 p-1 rounded-full shadow-md text-gray-600 hidden group-hover:block hover:bg-white"><ChevronRight size={16}/></button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-sm">
+             <div className="bg-gray-50 p-2 rounded-xl">
+               <div className="text-[10px] text-gray-400 text-center mb-1">誰付的錢?</div>
+               <div className="flex bg-white rounded-lg p-1 shadow-sm">
+                 <button onClick={() => setPaidBy('bf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${paidBy === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button>
+                 <button onClick={() => setPaidBy('gf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${paidBy === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button>
+               </div>
+             </div>
+             <div className="bg-gray-50 p-2 rounded-xl">
+               <div className="text-[10px] text-gray-400 text-center mb-1">分帳方式</div>
+               <select value={splitType} onChange={e => { setSplitType(e.target.value); if(e.target.value === 'custom') { const half = (Number(safeCalculate(amount)) || 0) / 2; setCustomBf(half); setCustomGf(half); } }} className="w-full bg-white text-xs font-bold py-1.5 rounded-md border-none outline-none text-center"><option value="shared">平分 (50/50)</option><option value="custom">自訂金額</option><option value="bf_personal">男友全付</option><option value="gf_personal">女友全付</option></select>
+             </div>
+        </div>
+        {splitType === 'custom' && (<div className="bg-blue-50 p-3 rounded-xl border border-blue-100 animate-[fadeIn_0.2s]"><div className="text-[10px] text-blue-400 font-bold mb-2 text-center">輸入金額 (自動計算剩餘)</div><div className="flex gap-3 items-center"><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">男友應付</label><input type="number" value={customBf} onChange={(e) => handleCustomChange('bf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-blue-200" placeholder="0" /></div><div className="text-gray-400 font-bold">+</div><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">女友應付</label><input type="number" value={customGf} onChange={(e) => handleCustomChange('gf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-pink-200" placeholder="0" /></div></div></div>)}
+        <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={handleSubmit} compact={true} />
       </div>
-    </div>
+    </ModalLayout>
   );
 };
 
 const AddJarModal = ({ onClose, onSave, initialData }) => {
-  const [name, setName] = useState('');
-  const [target, setTarget] = useState('');
-  useEffect(() => { if (initialData) { setName(initialData.name); setTarget(initialData.targetAmount); } }, [initialData]);
+  const [name, setName] = useState(initialData?.name || '');
+  const [target, setTarget] = useState(initialData?.targetAmount?.toString() || '');
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl">
-        <h3 className="text-xl font-bold mb-4">{initialData ? '編輯存錢目標' : '新增存錢目標'}</h3>
-        <div className="space-y-3">
-          <input className="w-full bg-gray-50 p-3 rounded-xl outline-none focus:ring-2 focus:ring-green-100" placeholder="目標名稱" value={name} onChange={e => setName(e.target.value)} />
-          <input type="number" className="w-full bg-gray-50 p-3 rounded-xl outline-none focus:ring-2 focus:ring-green-100" placeholder="目標金額" value={target} onChange={e => setTarget(e.target.value)} />
-          <div className="flex gap-2 mt-4">
-            <button onClick={onClose} className="flex-1 py-3 text-gray-500 font-bold">取消</button>
-            <button onClick={() => { if(name && target) onSave(name, target); }} className="flex-1 py-3 bg-gradient-to-r from-teal-400 to-emerald-500 text-white rounded-xl font-bold shadow-lg">{initialData ? '儲存' : '建立'}</button>
-          </div>
+    <ModalLayout title={initialData ? "編輯存錢罐" : "新存錢罐"} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="bg-gray-50 p-3 rounded-2xl">
+          <label className="block mb-1 text-xs font-bold text-gray-400">目標金額</label>
+          <div className="text-2xl font-black text-gray-800 tracking-wider h-8 flex items-center overflow-hidden">{target ? target : <span className="text-gray-300">0</span>}</div>
         </div>
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="名稱 (例如: 旅遊基金)" className="w-full bg-gray-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none" />
+        <CalculatorKeypad value={target} onChange={setTarget} onConfirm={(val) => { if (name && val) onSave(name, val); }} compact={true} />
       </div>
-    </div>
+    </ModalLayout>
   );
 };
 
@@ -823,13 +704,64 @@ const DepositModal = ({ jar, onClose, onConfirm, role }) => {
   const [amount, setAmount] = useState('');
   if (!jar) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-xl font-bold mb-2">存入資金</h3>
-        <p className="text-gray-400 text-sm mb-4">目標：{jar.name}</p>
-        <div className="relative mb-4"><DollarSign size={20} className="absolute left-3 top-3 text-gray-400" /><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-gray-50 p-3 pl-10 rounded-xl text-2xl font-bold outline-none focus:ring-2 focus:ring-blue-100" placeholder="0" autoFocus /></div>
-        <div className="flex gap-2"><button onClick={onClose} className="flex-1 py-3 text-gray-500 font-bold">取消</button><button onClick={() => { if(amount) onConfirm(jar.id, amount, role); }} className="flex-1 py-3 bg-gray-800 text-white rounded-xl font-bold shadow-lg">確認存入</button></div>
+    <ModalLayout title={`存入: ${jar.name}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="text-center"><div className="text-gray-400 text-xs mb-1">目前進度</div><div className="font-bold text-xl text-gray-800">{formatMoney(jar.currentAmount)} <span className="text-gray-300 text-sm">/ {formatMoney(jar.targetAmount)}</span></div></div>
+        <div className="bg-gray-50 p-3 rounded-2xl text-center"><div className="text-xs text-gray-400 mb-1">存入金額</div><div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center text-green-500 overflow-hidden">{amount ? `+${amount}` : <span className="text-gray-300">0</span>}</div></div>
+        <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(val) => { if(Number(val) > 0) onConfirm(jar.id, val, role); }} compact={true} />
       </div>
-    </div>
+    </ModalLayout>
+  );
+};
+
+const JarHistoryModal = ({ jar, onClose, onUpdateItem, onDeleteItem }) => {
+  const [editingItem, setEditingItem] = useState(null);
+  const [editAmount, setEditAmount] = useState('');
+
+  const history = [...(jar.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  return (
+    <ModalLayout title={`${jar.name} - 存錢紀錄`} onClose={onClose}>
+        {editingItem ? (
+            <div className="space-y-4 animate-[fadeIn_0.2s]">
+                <button onClick={() => setEditingItem(null)} className="flex items-center gap-1 text-gray-500 text-xs font-bold mb-2"><ArrowLeft size={14}/> 返回列表</button>
+                <div className="bg-gray-50 p-3 rounded-2xl text-center">
+                    <div className="text-xs text-gray-400 mb-1">修改金額</div>
+                    <div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">{editAmount}</div>
+                </div>
+                <CalculatorKeypad 
+                    value={editAmount} 
+                    onChange={setEditAmount} 
+                    onConfirm={(val) => {
+                        if(Number(val) >= 0) {
+                            onUpdateItem(jar, editingItem, val);
+                            setEditingItem(null);
+                        }
+                    }} 
+                    compact={true} 
+                />
+            </div>
+        ) : (
+            <div className="space-y-2">
+                {history.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">尚無詳細紀錄</div> : history.map((item, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl">
+                        <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${item.role === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>
+                                {item.role === 'bf' ? '👦' : '👧'}
+                            </div>
+                            <div>
+                                <div className="text-xs text-gray-400">{new Date(item.date).toLocaleDateString()}</div>
+                                <div className="font-bold text-gray-800">{formatMoney(item.amount)}</div>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => { setEditingItem(item); setEditAmount(item.amount.toString()); }} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-blue-500"><Pencil size={16}/></button>
+                            <button onClick={() => onDeleteItem(jar, item)} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
+    </ModalLayout>
   );
 };
