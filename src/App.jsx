@@ -235,7 +235,27 @@ export default function CoupleLedgerApp() {
     try {
         const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
         const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
-        const unsubTrans = onSnapshot(transRef, (s) => setTransactions(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => new Date(b.date) - new Date(a.date))));
+        
+        const unsubTrans = onSnapshot(transRef, (s) => {
+          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          // 修改排序邏輯：先比日期(新到舊)，日期相同比建立時間(新到舊)
+          data.sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            // 1. 先比較日期 (越新的日期越上面)
+            if (dateB !== dateA) return dateB - dateA;
+            
+            // 2. 如果日期一樣，比較建立時間 (越晚新增的越上面)
+            // 使用 createdAt?.seconds 取得 Firebase Timestamp
+            const timeA = a.createdAt?.seconds || 0;
+            const timeB = b.createdAt?.seconds || 0;
+            return timeB - timeA;
+          });
+
+          setTransactions(data);
+        });
+
         const unsubJars = onSnapshot(jarsRef, (s) => setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))));
         return () => { unsubTrans(); unsubJars(); };
     } catch (e) { console.error(e); }
