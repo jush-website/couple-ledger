@@ -11,7 +11,7 @@ import {
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
-  ArrowLeft, Check, History
+  ArrowLeft, Check, History, Percent
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -443,7 +443,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
         t.paidBy === 'bf' ? bfLent -= amt : bfLent += amt;
       } else {
         let gfShare = 0, bfShare = 0;
-        if (t.splitType === 'custom' && t.splitDetails) {
+        if ((t.splitType === 'custom' || t.splitType === 'ratio') && t.splitDetails) {
             gfShare = Number(t.splitDetails.gf) || 0;
             bfShare = Number(t.splitDetails.bf) || 0;
         } else if (t.splitType === 'shared') { 
@@ -486,7 +486,9 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
                     <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
                     <div className="min-w-0 flex-1">
                         <div className="font-bold text-gray-800 truncate">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div>
-                        <div className="text-xs text-gray-400 flex gap-1 truncate"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>{t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : '自訂分帳'))}</span></div>
+                        <div className="text-xs text-gray-400 flex gap-1 truncate"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>
+                            {t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : (t.splitType === 'ratio' ? `比例 (${Math.round((t.splitDetails?.bf / (Number(t.amount)||1))*100)}%)` : '自訂分帳')))}
+                        </span></div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0"><span className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{formatMoney(t.amount)}</span><button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="text-gray-300 hover:text-red-400 p-1"><Trash2 size={16} /></button></div>
@@ -589,13 +591,27 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   
   const [customBf, setCustomBf] = useState(initialData?.splitDetails?.bf || '');
   const [customGf, setCustomGf] = useState(initialData?.splitDetails?.gf || '');
+  
+  // Slider state
+  const [ratioValue, setRatioValue] = useState(
+      initialData?.splitType === 'ratio' && initialData.amount 
+      ? Math.round((initialData.splitDetails.bf / initialData.amount) * 100) 
+      : 50
+  );
 
   const scrollRef = useRef(null);
   const scroll = (offset) => { if(scrollRef.current) scrollRef.current.scrollBy({ left: offset, behavior: 'smooth' }); };
 
+  // Effect to update customBf/Gf when ratio or amount changes in ratio mode
   useEffect(() => {
-    if (splitType === 'custom' && amount && !isNaN(amount)) { }
-  }, [amount, splitType]);
+    if (splitType === 'ratio') {
+        const total = Number(safeCalculate(amount)) || 0;
+        const bf = Math.round(total * (ratioValue / 100));
+        const gf = total - bf;
+        setCustomBf(bf.toString());
+        setCustomGf(gf.toString());
+    }
+  }, [amount, ratioValue, splitType]);
 
   const handleCustomChange = (who, val) => {
     const numVal = Number(val);
@@ -607,7 +623,11 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   const handleSubmit = (finalAmount) => {
     if (!finalAmount || finalAmount === '0' || isNaN(Number(finalAmount))) return;
     const payload = { amount: finalAmount, note, date, category, paidBy, splitType, updatedAt: serverTimestamp() };
-    if (splitType === 'custom') { payload.splitDetails = { bf: Number(customBf) || 0, gf: Number(customGf) || 0 }; }
+    
+    if (splitType === 'custom' || splitType === 'ratio') { 
+        payload.splitDetails = { bf: Number(customBf) || 0, gf: Number(customGf) || 0 }; 
+    }
+    
     onSave(payload);
   };
 
@@ -618,7 +638,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
           <div className="text-3xl font-black text-gray-800 tracking-wider h-9 flex items-center justify-center overflow-hidden">{amount ? amount : <span className="text-gray-300">0</span>}</div>
         </div>
         
-        {/* FIX: Date input mobile layout fix */}
         <div className="flex gap-2">
            <input 
              type="date" 
@@ -650,10 +669,52 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
              </div>
              <div className="bg-gray-50 p-2 rounded-xl">
                <div className="text-[10px] text-gray-400 text-center mb-1">分帳方式</div>
-               <select value={splitType} onChange={e => { setSplitType(e.target.value); if(e.target.value === 'custom') { const half = (Number(safeCalculate(amount)) || 0) / 2; setCustomBf(half); setCustomGf(half); } }} className="w-full bg-white text-xs font-bold py-1.5 rounded-md border-none outline-none text-center"><option value="shared">平分 (50/50)</option><option value="custom">自訂金額</option><option value="bf_personal">男友全付</option><option value="gf_personal">女友全付</option></select>
+               <select value={splitType} onChange={e => { 
+                   setSplitType(e.target.value); 
+                   if(e.target.value === 'custom') { 
+                       const half = (Number(safeCalculate(amount)) || 0) / 2; 
+                       setCustomBf(half.toString()); 
+                       setCustomGf(half.toString()); 
+                   }
+                   if(e.target.value === 'ratio') {
+                       setRatioValue(50);
+                   }
+               }} className="w-full bg-white text-xs font-bold py-1.5 rounded-md border-none outline-none text-center">
+                   <option value="shared">平分 (50/50)</option>
+                   <option value="ratio">比例分帳 (滑動)</option>
+                   <option value="custom">自訂金額</option>
+                   <option value="bf_personal">男友100%</option>
+                   <option value="gf_personal">女友100%</option>
+               </select>
              </div>
         </div>
+
+        {/* Ratio Slider UI */}
+        {splitType === 'ratio' && (
+            <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 animate-[fadeIn_0.2s]">
+                <div className="flex justify-between text-[10px] font-bold text-gray-500 mb-1">
+                    <span className="text-blue-500">男友 {ratioValue}%</span>
+                    <span className="text-purple-400">比例分配</span>
+                    <span className="text-pink-500">女友 {100 - ratioValue}%</span>
+                </div>
+                <input 
+                    type="range" 
+                    min="0" 
+                    max="100" 
+                    value={ratioValue} 
+                    onChange={(e) => setRatioValue(Number(e.target.value))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500 mb-2"
+                />
+                <div className="flex justify-between text-xs font-bold">
+                    <span className="text-blue-600">{formatMoney(customBf)}</span>
+                    <span className="text-pink-600">{formatMoney(customGf)}</span>
+                </div>
+            </div>
+        )}
+
+        {/* Custom Input UI */}
         {splitType === 'custom' && (<div className="bg-blue-50 p-3 rounded-xl border border-blue-100 animate-[fadeIn_0.2s]"><div className="text-[10px] text-blue-400 font-bold mb-2 text-center">輸入金額 (自動計算剩餘)</div><div className="flex gap-3 items-center"><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">男友應付</label><input type="number" value={customBf} onChange={(e) => handleCustomChange('bf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-blue-200" placeholder="0" /></div><div className="text-gray-400 font-bold">+</div><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">女友應付</label><input type="number" value={customGf} onChange={(e) => handleCustomChange('gf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-pink-200" placeholder="0" /></div></div></div>)}
+        
         <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={handleSubmit} compact={true} />
       </div>
     </ModalLayout>
