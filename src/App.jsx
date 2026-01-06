@@ -9,10 +9,9 @@ import {
 } from 'firebase/auth';
 import { 
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
-  Plus, ArrowRightLeft, Trash2, Check, User, 
-  Calendar, Target, Settings, LogOut,
-  RefreshCw, Pencil, CheckCircle, AlertTriangle, X,
-  ChevronLeft, ChevronRight, ArrowLeft, Percent, Calculator, History
+  Plus, Trash2, User, Calendar, Target, Settings, LogOut,
+  RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
+  ArrowLeft, Check, History
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -26,21 +25,19 @@ const firebaseConfig = {
   measurementId: "G-XD01TYP1PQ"
 };
 
-// Singleton initialization
 let app;
 try {
   app = initializeApp(firebaseConfig);
 } catch (e) {
-  // Ignore if already initialized
+  // Ignore
 }
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// FIX: Sanitize appId
 const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const appId = rawAppId.replace(/\//g, '_').replace(/\./g, '_');
 
-// --- Constants & Helpers ---
+// --- Constants ---
 const CATEGORIES = [
   { id: 'food', name: '餐飲', color: '#FF8042' },
   { id: 'transport', name: '交通', color: '#00C49F' },
@@ -58,17 +55,13 @@ const formatMoney = (amount) => {
   return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(num);
 };
 
-// Safe simple calculator
 const safeCalculate = (expression) => {
   try {
     const sanitized = (expression || '').toString().replace(/[^0-9+\-*/.]/g, '');
     if (!sanitized) return '';
     const parts = sanitized.split(/([+\-*/])/).filter(p => p.trim() !== '');
     if (parts.length === 0) return '';
-    
-    // Simple math evaluation
     let tokens = [...parts];
-    // Mul/Div
     for (let i = 1; i < tokens.length - 1; i += 2) {
       if (tokens[i] === '*' || tokens[i] === '/') {
         const prev = parseFloat(tokens[i-1]);
@@ -81,7 +74,6 @@ const safeCalculate = (expression) => {
         i -= 2;
       }
     }
-    // Add/Sub
     let result = parseFloat(tokens[0]);
     for (let i = 1; i < tokens.length; i += 2) {
       const op = tokens[i];
@@ -97,16 +89,27 @@ const safeCalculate = (expression) => {
 
 // --- Components ---
 
+// FIX: Use inline styles for AppLoading to prevent FOUC (Flash of Unstyled Content) before Tailwind loads
 const AppLoading = () => (
-  <div className="fixed inset-0 z-[9999] bg-gradient-to-br from-pink-50 to-blue-50 flex flex-col items-center justify-center">
-    <div className="relative">
-      <div className="absolute inset-0 bg-white rounded-full blur-xl opacity-50 animate-pulse"></div>
-      <div className="bg-white p-6 rounded-full shadow-2xl relative z-10 animate-bounce">
-        <Heart className="text-pink-500 fill-pink-500" size={64} />
-      </div>
+  <div style={{
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 9999,
+    background: 'linear-gradient(135deg, #fdf2f8 0%, #eff6ff 100%)',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    fontFamily: 'system-ui, -apple-system, sans-serif'
+  }}>
+    <div style={{
+      backgroundColor: 'white', padding: '24px', borderRadius: '50%',
+      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+      marginBottom: '20px'
+    }}>
+       {/* Use simple SVG here to ensure it renders without lucide first if needed, but lucide is usually fine */}
+       <svg width="64" height="64" viewBox="0 0 24 24" fill="#ec4899" stroke="#ec4899" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+       </svg>
     </div>
-    <h2 className="mt-8 text-2xl font-bold text-gray-700 tracking-widest animate-pulse">載入中...</h2>
-    <p className="text-gray-400 text-sm mt-2">正在同步我們的小金庫</p>
+    <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#374151', letterSpacing: '0.1em' }}>載入中...</h2>
+    <p style={{ color: '#9ca3af', fontSize: '0.875rem', marginTop: '8px' }}>正在同步我們的小金庫</p>
   </div>
 );
 
@@ -139,7 +142,7 @@ const CalculatorKeypad = ({ value, onChange, onConfirm, compact = false }) => {
           <button
             key={i}
             type="button"
-            onClick={() => handlePress(k.val || k.label)}
+            onClick={(e) => { e.stopPropagation(); handlePress(k.val || k.label); }}
             className={`
               ${compact ? 'h-9 text-base' : 'h-11 text-lg'} rounded-xl font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center
               ${k.type === 'op' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-700'}
@@ -151,10 +154,10 @@ const CalculatorKeypad = ({ value, onChange, onConfirm, compact = false }) => {
         ))}
       </div>
       <div className="flex gap-2">
-         <button type="button" onClick={() => handlePress('backspace')} className={`${compact ? 'h-9' : 'h-11'} flex-1 bg-gray-200 rounded-xl flex items-center justify-center text-gray-600 active:scale-95 transition-transform hover:bg-gray-300`}>
+         <button type="button" onClick={(e) => { e.stopPropagation(); handlePress('backspace'); }} className={`${compact ? 'h-9' : 'h-11'} flex-1 bg-gray-200 rounded-xl flex items-center justify-center text-gray-600 active:scale-95 transition-transform hover:bg-gray-300`}>
            <ArrowLeft size={compact ? 20 : 24} />
          </button>
-         <button type="button" onClick={() => { const result = safeCalculate(value); onChange(result); onConfirm && onConfirm(result); }} className={`${compact ? 'h-9' : 'h-11'} flex-[2] bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md`}>
+         <button type="button" onClick={(e) => { e.stopPropagation(); const result = safeCalculate(value); onChange(result); onConfirm && onConfirm(result); }} className={`${compact ? 'h-9' : 'h-11'} flex-[2] bg-green-500 hover:bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md`}>
             <Check size={20} /> <span>確認</span>
          </button>
       </div>
@@ -195,7 +198,6 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
-// --- Main Application ---
 export default function CoupleLedgerApp() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -210,8 +212,6 @@ export default function CoupleLedgerApp() {
   const [showAddJar, setShowAddJar] = useState(false);
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
-  
-  // History Feature
   const [showJarHistory, setShowJarHistory] = useState(null); 
   
   const [toast, setToast] = useState(null); 
@@ -286,7 +286,7 @@ export default function CoupleLedgerApp() {
             targetAmount: finalTarget, 
             currentAmount: 0, 
             contributions: { bf: 0, gf: 0 }, 
-            history: [], // Initialize empty history
+            history: [], 
             createdAt: serverTimestamp() 
         });
         showToast('存錢罐已建立 🎯');
@@ -315,7 +315,6 @@ export default function CoupleLedgerApp() {
       const newAmount = (jar.currentAmount || 0) + depositAmount;
       const newContrib = { ...jar.contributions, [contributorRole]: (jar.contributions?.[contributorRole] || 0) + depositAmount };
       
-      // Create new history item
       const newHistoryItem = {
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
           amount: depositAmount,
@@ -334,23 +333,14 @@ export default function CoupleLedgerApp() {
     } catch (e) { console.error(e); }
   };
 
-  // --- Jar History Operations ---
   const handleUpdateJarHistoryItem = async (jar, oldItem, newAmount) => {
     try {
         const diff = Number(newAmount) - oldItem.amount;
         const newTotal = (jar.currentAmount || 0) + diff;
         const newContrib = { ...jar.contributions };
         newContrib[oldItem.role] = (newContrib[oldItem.role] || 0) + diff;
-
-        const newHistory = (jar.history || []).map(item => 
-            item.id === oldItem.id ? { ...item, amount: Number(newAmount) } : item
-        );
-
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), {
-            currentAmount: newTotal,
-            contributions: newContrib,
-            history: newHistory
-        });
+        const newHistory = (jar.history || []).map(item => item.id === oldItem.id ? { ...item, amount: Number(newAmount) } : item);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
         showToast('紀錄已修正 ✨');
     } catch(e) { console.error(e); }
   };
@@ -363,14 +353,8 @@ export default function CoupleLedgerApp() {
                 const newTotal = (jar.currentAmount || 0) - item.amount;
                 const newContrib = { ...jar.contributions };
                 newContrib[item.role] = Math.max(0, (newContrib[item.role] || 0) - item.amount);
-                
                 const newHistory = (jar.history || []).filter(h => h.id !== item.id);
-
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), {
-                    currentAmount: newTotal,
-                    contributions: newContrib,
-                    history: newHistory
-                });
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
                 showToast('紀錄已刪除 🗑️');
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
             } catch(e) { console.error(e); }
@@ -413,13 +397,7 @@ export default function CoupleLedgerApp() {
       {toast && <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-[fadeIn_0.3s_ease-out]"><CheckCircle size={18} className="text-green-400" /><span className="text-sm font-medium">{toast}</span></div>}
 
       {confirmModal.isOpen && (
-        <div 
-          className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s]"
-          onClick={(e) => {
-            // Click outside to close confirm modal
-            if (e.target === e.currentTarget) setConfirmModal(prev => ({ ...prev, isOpen: false }));
-          }}
-        >
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) setConfirmModal(prev => ({ ...prev, isOpen: false })); }}>
           <div className="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
             <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
             <p className="text-gray-500 text-sm mb-6">{confirmModal.message}</p>
@@ -439,7 +417,6 @@ export default function CoupleLedgerApp() {
   );
 }
 
-// --- Sub-Components ---
 const NavBtn = ({ icon: Icon, label, active, onClick, role }) => (
   <button onClick={onClick} className={`flex flex-col items-center gap-1 w-full ${active ? (role === 'bf' ? 'text-blue-600' : 'text-pink-600') : 'text-gray-400'}`}>
     <Icon size={24} strokeWidth={active ? 2.5 : 2} />
@@ -459,7 +436,7 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-// --- Overview Component ---
+// FIX: Added min-w-0 and truncation to list items to prevent "numbers running away"
 const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
@@ -508,11 +485,14 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
               <div className="text-xs font-bold text-gray-400 ml-2 bg-gray-100 inline-block px-2 py-1 rounded-md">{date}</div>
               {items.map(t => (
                 <div key={t.id} onClick={() => onEdit(t)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between active:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
-                    <div><div className="font-bold text-gray-800">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div><div className="text-xs text-gray-400 flex gap-1"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>{t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : '自訂分帳'))}</span></div></div>
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
+                    <div className="min-w-0 flex-1">
+                        <div className="font-bold text-gray-800 truncate">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div>
+                        <div className="text-xs text-gray-400 flex gap-1 truncate"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>{t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : '自訂分帳'))}</span></div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3"><span className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{formatMoney(t.amount)}</span><button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="text-gray-300 hover:text-red-400 p-1"><Trash2 size={16} /></button></div>
+                  <div className="flex items-center gap-3 flex-shrink-0"><span className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{formatMoney(t.amount)}</span><button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="text-gray-300 hover:text-red-400 p-1"><Trash2 size={16} /></button></div>
                 </div>
               ))}
             </div>
@@ -590,15 +570,8 @@ const SettingsView = ({ role, onLogout }) => (
   </div>
 );
 
-// --- Modals ---
 const ModalLayout = ({ title, onClose, children }) => (
-  <div 
-    className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]"
-    onClick={(e) => {
-      // Click outside (background) to close
-      if (e.target === e.currentTarget) onClose();
-    }}
-  >
+  <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="bg-white w-full sm:max-w-md h-auto max-h-[90vh] sm:rounded-3xl rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-[slideUp_0.3s_ease-out]">
       <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
         <h2 className="text-base font-bold text-gray-800">{title}</h2>
@@ -652,7 +625,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
            <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="備註 (例如: 晚餐)" className="bg-gray-50 border-none rounded-xl p-2 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none flex-1" />
         </div>
         
-        {/* Categories Scrollable */}
         <div className="relative group">
             <button onClick={() => scroll(-100)} className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 p-1 rounded-full shadow-md text-gray-600 hidden group-hover:block hover:bg-white"><ChevronLeft size={16}/></button>
             <div ref={scrollRef} className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar scroll-smooth">
