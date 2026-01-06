@@ -190,7 +190,8 @@ const SimpleDonutChart = ({ data, total }) => {
           );
         })}
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transform rotate-90">
+      {/* 修正：移除了 transform rotate-90，讓文字恢復水平顯示 */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
          <span className="text-xs text-gray-400 font-bold uppercase tracking-wider">總支出</span>
          <span className="text-2xl font-black text-gray-800">{formatMoney(total)}</span>
       </div>
