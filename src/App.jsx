@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
-  deleteDoc, doc, updateDoc, serverTimestamp 
+  deleteDoc, doc, updateDoc, serverTimestamp,
+  writeBatch, query, where, getDocs
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged 
@@ -11,7 +12,7 @@ import {
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
-  ArrowLeft, Check, History, Percent
+  ArrowLeft, Check, History, Percent, Book, MoreHorizontal
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -204,6 +205,8 @@ export default function CoupleLedgerApp() {
 
   const [transactions, setTransactions] = useState([]);
   const [jars, setJars] = useState([]);
+  const [books, setBooks] = useState([]);
+  const [activeBookId, setActiveBookId] = useState(null);
 
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null); 
@@ -211,6 +214,9 @@ export default function CoupleLedgerApp() {
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
   const [showJarHistory, setShowJarHistory] = useState(null); 
+  
+  const [showBookManager, setShowBookManager] = useState(false);
+  const [editingBook, setEditingBook] = useState(null);
   
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
@@ -230,24 +236,43 @@ export default function CoupleLedgerApp() {
     return () => { clearTimeout(timer); unsubscribe(); };
   }, []);
 
+  // Initialize Data Listeners
   useEffect(() => {
     if (!user) return;
     try {
         const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
         const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
+        const booksRef = collection(db, 'artifacts', appId, 'public', 'data', 'books');
         
+        // Listen to Books
+        const unsubBooks = onSnapshot(booksRef, async (s) => {
+            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Sort by CreatedAt
+            data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+            
+            // If no books exist, create default one
+            if (data.length === 0 && !s.metadata.hasPendingWrites) {
+               await addDoc(booksRef, { name: "預設帳本", createdAt: serverTimestamp() });
+               return; 
+            }
+            
+            setBooks(data);
+            // Set active book if not set or invalid
+            if (data.length > 0) {
+               setActiveBookId(prev => {
+                   if (!prev || !data.find(b => b.id === prev)) return data[0].id;
+                   return prev;
+               });
+            }
+        });
+
         const unsubTrans = onSnapshot(transRef, (s) => {
           const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
           
-          // 修改排序邏輯：先比日期(新到舊)，日期相同比建立時間(新到舊)
           data.sort((a, b) => {
             const dateA = new Date(a.date).getTime();
             const dateB = new Date(b.date).getTime();
-            // 1. 先比較日期 (越新的日期越上面)
             if (dateB !== dateA) return dateB - dateA;
-            
-            // 2. 如果日期一樣，比較建立時間 (越晚新增的越上面)
-            // 使用 createdAt?.seconds 取得 Firebase Timestamp
             const timeA = a.createdAt?.seconds || 0;
             const timeB = b.createdAt?.seconds || 0;
             return timeB - timeA;
@@ -257,17 +282,31 @@ export default function CoupleLedgerApp() {
         });
 
         const unsubJars = onSnapshot(jarsRef, (s) => setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))));
-        return () => { unsubTrans(); unsubJars(); };
+        return () => { unsubTrans(); unsubJars(); unsubBooks(); };
     } catch (e) { console.error(e); }
   }, [user]);
 
+  // Derived filtered transactions based on Active Book
+  const filteredTransactions = useMemo(() => {
+      if (!activeBookId) return [];
+      // If a transaction has a bookId, match it. 
+      // If it doesn't have a bookId (legacy data), assign it to the FIRST book in the list (usually "預設帳本")
+      const defaultBookId = books[0]?.id;
+      return transactions.filter(t => {
+          if (t.bookId) return t.bookId === activeBookId;
+          // Legacy data handling: show in the default book
+          return activeBookId === defaultBookId;
+      });
+  }, [transactions, activeBookId, books]);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
+  // --- Transaction Actions ---
   const handleSaveTransaction = async (data) => {
     if (!user) return;
     try {
       const finalAmount = Number(safeCalculate(data.amount));
-      const cleanData = { ...data, amount: finalAmount };
+      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId }; // Attach bookId
       if (editingTransaction) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
         showToast('紀錄已更新 ✨');
@@ -291,6 +330,7 @@ export default function CoupleLedgerApp() {
     });
   };
 
+  // --- Jar Actions ---
   const handleSaveJar = async (name, target) => {
     if (!user) return;
     try {
@@ -380,6 +420,60 @@ export default function CoupleLedgerApp() {
     });
   };
 
+  // --- Book Actions ---
+  const handleSaveBook = async (name) => {
+      if(!user || !name.trim()) return;
+      try {
+          if(editingBook) {
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', editingBook.id), {
+                  name, updatedAt: serverTimestamp()
+              });
+              showToast('帳本名稱已更新 ✨');
+          } else {
+              const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'books'), {
+                  name, createdAt: serverTimestamp()
+              });
+              setActiveBookId(docRef.id); // Auto switch to new book
+              showToast('新帳本已建立 📘');
+          }
+          setShowBookManager(false);
+          setEditingBook(null);
+      } catch(e) { console.error(e); }
+  };
+
+  const handleDeleteBook = async (bookId) => {
+      if(books.length <= 1) {
+          showToast('至少需要保留一個帳本 ⚠️');
+          return;
+      }
+      setConfirmModal({
+        isOpen: true, title: "刪除帳本", message: "確定要刪除這個帳本嗎？裡面的記帳紀錄也會一併刪除喔！(此動作無法復原)", isDanger: true,
+        onConfirm: async () => {
+            try {
+                // Delete the book doc
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', bookId));
+                
+                // Find and delete all related transactions
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), where("bookId", "==", bookId));
+                const snap = await getDocs(q);
+                const batch = writeBatch(db);
+                snap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+
+                // If deleting active book, switch to another
+                if(activeBookId === bookId) {
+                    const remaining = books.filter(b => b.id !== bookId);
+                    if(remaining.length > 0) setActiveBookId(remaining[0].id);
+                }
+                
+                showToast('帳本已刪除 🗑️');
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            } catch(e) { console.error(e); }
+        }
+      });
+  };
+
+
   if (loading) return <AppLoading />;
   if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role', r); }} />;
 
@@ -397,8 +491,39 @@ export default function CoupleLedgerApp() {
       </div>
 
       <div className="max-w-2xl mx-auto p-4">
-        {activeTab === 'overview' && <Overview transactions={transactions} role={role} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onEdit={(t) => { setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={handleDeleteTransaction} />}
-        {activeTab === 'stats' && <Statistics transactions={transactions} />}
+        {/* Book Selector UI (Only on Overview) */}
+        {activeTab === 'overview' && (
+             <div className="mb-4 flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
+                 {books.map(book => (
+                     <button 
+                        key={book.id} 
+                        onClick={() => setActiveBookId(book.id)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all shadow-sm ${activeBookId === book.id ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+                     >
+                         <Book size={14} />
+                         {book.name}
+                         {activeBookId === book.id && (
+                             <div onClick={(e) => { e.stopPropagation(); setEditingBook(book); setShowBookManager(true); }} className="ml-1 p-1 rounded-full hover:bg-white/20">
+                                 <Settings size={12} />
+                             </div>
+                         )}
+                     </button>
+                 ))}
+                 <button onClick={() => { setEditingBook(null); setShowBookManager(true); }} className="px-3 py-2 bg-white text-gray-400 rounded-xl shadow-sm hover:bg-gray-50">
+                     <Plus size={18} />
+                 </button>
+             </div>
+        )}
+        
+        {activeTab === 'overview' && <Overview transactions={filteredTransactions} role={role} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onEdit={(t) => { setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={handleDeleteTransaction} />}
+        {activeTab === 'stats' && (
+            <div>
+                <div className="bg-white px-4 py-2 rounded-xl shadow-sm mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600">
+                    <Book size={14}/> 統計範圍: {books.find(b => b.id === activeBookId)?.name || '未知帳本'}
+                </div>
+                <Statistics transactions={filteredTransactions} />
+            </div>
+        )}
         {activeTab === 'savings' && <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j)} />}
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
@@ -431,6 +556,15 @@ export default function CoupleLedgerApp() {
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
+      
+      {showBookManager && (
+          <BookManagerModal 
+            onClose={() => setShowBookManager(false)} 
+            onSave={handleSaveBook} 
+            onDelete={handleDeleteBook}
+            initialData={editingBook}
+          />
+      )}
     </div>
   );
 }
@@ -489,7 +623,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
     <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
         <div className={`absolute top-0 left-0 w-full h-1 ${Math.abs(debt) < 1 ? 'bg-green-400' : (debt > 0 ? 'bg-blue-400' : 'bg-pink-400')}`}></div>
-        <h2 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">當前狀態</h2>
+        <h2 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">本帳本結算</h2>
         <div className="flex items-center justify-center gap-2">
           {Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500 flex items-center gap-2"><CheckCircle /> 互不相欠</div> : <><span className={`text-3xl font-black ${debt > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debt > 0 ? '男朋友' : '女朋友'}</span><span className="text-gray-400 text-sm">先墊了</span><span className="text-2xl font-bold text-gray-800">{formatMoney(Math.abs(debt))}</span></>}
         </div>
@@ -497,7 +631,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
 
       <div className="space-y-4">
         <div className="flex justify-between items-end px-2"><h3 className="font-bold text-lg text-gray-800">最近紀錄</h3><button onClick={onAdd} className="bg-gray-900 text-white p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform"><Plus size={20} /></button></div>
-        {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">還沒有記帳紀錄喔</div> : grouped.map(([date, items]) => (
+        {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, items]) => (
             <div key={date} className="space-y-2">
               <div className="text-xs font-bold text-gray-400 ml-2 bg-gray-100 inline-block px-2 py-1 rounded-md">{date}</div>
               {items.map(t => (
@@ -600,6 +734,46 @@ const ModalLayout = ({ title, onClose, children }) => (
     </div>
   </div>
 );
+
+// --- New Component: Book Manager ---
+const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
+    const [name, setName] = useState(initialData?.name || '');
+    
+    return (
+        <ModalLayout title={initialData ? "編輯帳本" : "新增帳本"} onClose={onClose}>
+            <div className="space-y-4 pt-2">
+                <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1">帳本名稱</label>
+                    <input 
+                        type="text" 
+                        value={name} 
+                        onChange={e => setName(e.target.value)} 
+                        placeholder="例如: 日常開銷、日本旅遊" 
+                        className="w-full bg-gray-50 border-none rounded-xl p-3 text-base font-bold focus:ring-2 focus:ring-blue-100 outline-none" 
+                        autoFocus
+                    />
+                </div>
+                
+                <button 
+                    onClick={() => onSave(name)}
+                    disabled={!name.trim()}
+                    className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform"
+                >
+                    儲存
+                </button>
+
+                {initialData && (
+                    <button 
+                        onClick={() => onDelete(initialData.id)}
+                        className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100"
+                    >
+                        <Trash2 size={16} /> 刪除此帳本
+                    </button>
+                )}
+            </div>
+        </ModalLayout>
+    );
+};
 
 const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) => {
   const [amount, setAmount] = useState(initialData?.amount?.toString() || '');
