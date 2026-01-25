@@ -57,7 +57,6 @@ const safeCalculate = (expression) => {
   try {
     const sanitized = (expression || '').toString().replace(/[^0-9+\-*/.]/g, '');
     if (!sanitized) return '0';
-    // Use Function constructor instead of direct eval for safety and to avoid bundler warnings
     const result = new Function(`return ${sanitized}`)();
     return isNaN(result) || !isFinite(result) ? '0' : Math.floor(result).toString();
   } catch (e) {
@@ -189,20 +188,6 @@ const CalculatorKeypad = ({ value, onChange, onConfirm, compact = false }) => {
     </div>
   );
 };
-
-const RoleSelection = ({ onSelect }) => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
-    <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
-      <Heart className="mx-auto text-pink-500 mb-6 animate-pulse" size={56} />
-      <h1 className="text-2xl font-bold mb-2 text-gray-800 tracking-tight">小金庫 2.5 AI</h1>
-      <p className="text-gray-400 text-sm mb-10">請選擇您在帳本中的身份，讓我們為您開始服務</p>
-      <div className="space-y-4">
-        <button onClick={() => onSelect('bf')} className="w-full py-4 bg-blue-500 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 active:scale-95 transition-all">我是男朋友 👦</button>
-        <button onClick={() => onSelect('gf')} className="w-full py-4 bg-pink-500 text-white rounded-2xl font-bold shadow-lg shadow-pink-100 active:scale-95 transition-all">我是女朋友 👧</button>
-      </div>
-    </div>
-  </div>
-);
 
 // --- Sub-views ---
 
@@ -462,8 +447,15 @@ export default function App() {
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
 
-  // Auth Initialization
+  // Tailwind Injection & Auth Initialization
   useEffect(() => {
+    // Inject Tailwind CDN
+    if (!document.querySelector('script[src*="tailwindcss"]')) {
+      const script = document.createElement('script');
+      script.src = "https://cdn.tailwindcss.com";
+      document.head.appendChild(script);
+    }
+
     const initAuth = async () => {
       if (!auth) {
         setInitializing(false);
@@ -515,17 +507,17 @@ export default function App() {
                 return prev;
             });
         }
-    });
+    }, (err) => console.error("Books snapshot error", err));
 
     const unsubTrans = onSnapshot(transRef, (s) => {
       const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a, b) => new Date(b.date) - new Date(a.date));
       setTransactions(data);
-    });
+    }, (err) => console.error("Trans snapshot error", err));
 
     const unsubJars = onSnapshot(jarsRef, (s) => {
       setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)));
-    });
+    }, (err) => console.error("Jars snapshot error", err));
     
     return () => { unsubTrans(); unsubJars(); unsubBooks(); };
   }, [user]);
@@ -533,7 +525,21 @@ export default function App() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   if (initializing) return <AppLoading />;
-  if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role_v2', r); }} />;
+
+  // Role Selection View
+  if (!role) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+      <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm text-center">
+        <Heart className="mx-auto text-pink-500 mb-6 animate-pulse" size={56} />
+        <h1 className="text-2xl font-bold mb-2 text-gray-800 tracking-tight">小金庫 2.5 AI</h1>
+        <p className="text-gray-400 text-sm mb-10">請選擇您的身份，開始記錄專屬甜蜜帳本</p>
+        <div className="space-y-4">
+          <button onClick={() => { setRole('bf'); localStorage.setItem('couple_app_role_v2', 'bf'); }} className="w-full py-4 bg-blue-500 text-white rounded-2xl font-bold shadow-lg shadow-blue-100 active:scale-95 transition-all">我是男朋友 👦</button>
+          <button onClick={() => { setRole('gf'); localStorage.setItem('couple_app_role_v2', 'gf'); }} className="w-full py-4 bg-pink-500 text-white rounded-2xl font-bold shadow-lg shadow-pink-100 active:scale-95 transition-all">我是女朋友 👧</button>
+        </div>
+      </div>
+    </div>
+  );
 
   const displayedBooks = books.filter(b => showArchived ? b.status === 'archived' : b.status === 'active');
   const filteredTransactions = activeBookId ? transactions.filter(t => t.bookId === activeBookId || (!t.bookId && activeBookId === books[0]?.id)) : [];
@@ -549,7 +555,7 @@ export default function App() {
           </div>
           <button onClick={() => setShowArchived(!showArchived)} className="flex items-center gap-2 text-[10px] font-bold bg-black/10 px-4 py-2 rounded-full active:scale-95 transition-all">
              {showArchived ? <Eye size={12} /> : <Archive size={12} />}
-             {showArchived ? '回首頁' : '歷史帳本'}
+             {showArchived ? '回現役帳本' : '歷史帳本'}
           </button>
         </div>
       </div>
@@ -619,7 +625,7 @@ export default function App() {
                     </div>
                   );
                 })}
-                {jars.length === 0 && <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-gray-200 text-gray-300 text-sm">還沒有存錢計畫，快來一起存錢！</div>}
+                {jars.length === 0 && <div className="text-center py-16 bg-white rounded-3xl border border-dashed border-gray-200 text-gray-300 text-sm italic">還沒有存錢計畫，快來一起存錢！</div>}
              </div>
           </div>
         )}
@@ -677,9 +683,9 @@ export default function App() {
         <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom duration-300">
           <h2 className="font-bold text-xl mb-6">新存錢計畫</h2>
           <input id="jar-name" placeholder="目標名稱 (例如：週年出國)" className="w-full bg-gray-50 p-4 rounded-2xl mb-4 font-bold outline-none border border-gray-100" />
-          <div className="bg-gray-50 p-6 rounded-3xl mb-6 text-center border border-gray-100">
+          <div className="bg-gray-50 p-6 rounded-3xl mb-6 text-center border border-gray-100 shadow-inner">
              <input id="jar-target" type="number" placeholder="目標金額" className="bg-transparent text-3xl font-black text-center w-full outline-none" />
-             <div className="text-[10px] text-gray-400 uppercase font-bold mt-2">目標金額</div>
+             <div className="text-[10px] text-gray-400 uppercase font-bold mt-2 tracking-widest">目標金額</div>
           </div>
           <button onClick={async () => {
             const name = document.getElementById('jar-name').value;
@@ -713,7 +719,7 @@ export default function App() {
           <div className="flex justify-between items-center mb-6 font-bold text-xl text-gray-800 sticky top-0 bg-white py-2">存款紀錄：{showJarHistory.name} <button onClick={()=>setShowJarHistory(null)} className="p-2 bg-gray-50 rounded-full"><X size={20}/></button></div>
           <div className="space-y-3 pb-4">
              {(showJarHistory.history || []).map(item => (
-               <div key={item.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 shadow-sm transition-all">
+               <div key={item.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100 shadow-sm transition-all active:bg-gray-100">
                   <div className="flex items-center gap-4">
                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 border-white shadow-sm ${item.role === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>{item.role === 'bf' ? '👦' : '👧'}</div>
                      <div><div className="text-[10px] text-gray-400 font-bold">{item.date?.split('T')[0]}</div><div className="font-bold text-gray-700">{formatMoney(item.amount)}</div></div>
@@ -724,18 +730,29 @@ export default function App() {
           </div>
         </div>
       </div>}
-      {confirmModal.isOpen && <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"><div className="bg-white p-8 rounded-3xl w-full max-w-xs text-center shadow-2xl animate-in zoom-in duration-200"><h3 className="font-bold text-xl text-gray-800 mb-2">{confirmModal.title}</h3><p className="text-gray-400 text-sm mb-8 leading-relaxed px-2">{confirmModal.message}</p><div className="flex gap-3"><button onClick={() => setConfirmModal({isOpen:false})} className="flex-1 py-4 bg-gray-50 text-gray-500 rounded-2xl font-bold hover:bg-gray-100 transition-colors">取消</button><button onClick={confirmModal.onConfirm} className={`flex-1 py-4 text-white rounded-2xl font-bold shadow-lg ${confirmModal.isDanger ? 'bg-red-500 shadow-red-100' : 'bg-blue-500 shadow-blue-100'} active:scale-95 transition-all`}>確定</button></div></div></div>}
+      {confirmModal.isOpen && <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6"><div className="bg-white p-8 rounded-3xl w-full max-w-xs text-center shadow-2xl animate-in zoom-in duration-200 border border-gray-100"><h3 className="font-bold text-xl text-gray-800 mb-2">{confirmModal.title}</h3><p className="text-gray-400 text-sm mb-8 leading-relaxed px-2">{confirmModal.message}</p><div className="flex gap-3"><button onClick={() => setConfirmModal({isOpen:false})} className="flex-1 py-4 bg-gray-50 text-gray-500 rounded-2xl font-bold hover:bg-gray-100 transition-colors">取消</button><button onClick={confirmModal.onConfirm} className={`flex-1 py-4 text-white rounded-2xl font-bold shadow-lg ${confirmModal.isDanger ? 'bg-red-500 shadow-red-100' : 'bg-blue-500 shadow-blue-100'} active:scale-95 transition-all`}>確定</button></div></div></div>}
       {toast && <div className="fixed top-24 left-1/2 -translate-x-1/2 bg-gray-900/90 text-white px-8 py-3 rounded-full shadow-2xl z-[100] text-sm font-bold animate-in fade-in slide-in-from-top-4 duration-300">{toast}</div>}
     </div>
   );
 }
 
-// Global styles
+// Global styles injection
 if (typeof document !== 'undefined') {
   const style = document.createElement('style');
   style.innerHTML = `
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    @keyframes slide-in-from-bottom { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    @keyframes slide-in-from-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    @keyframes slide-in-from-top-4 { from { transform: translate(-50%, -1rem); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+    .animate-in { animation-duration: 300ms; animation-fill-mode: both; }
+    .slide-in-from-bottom { animation-name: slide-in-from-bottom; }
+    .slide-in-from-right { animation-name: slide-in-from-right; }
+    .slide-in-from-top-4 { animation-name: slide-in-from-top-4; }
+    .fade-in { animation-name: fadeIn; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .zoom-in { animation-name: zoomIn; }
+    @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
   `;
   document.head.appendChild(style);
 }
