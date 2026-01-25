@@ -47,7 +47,6 @@ const CATEGORIES = [
   { id: 'house', name: '居家', color: '#8884d8' },
   { id: 'travel', name: '旅遊', color: '#FF6B6B' },
   { id: 'other', name: '其他', color: '#999' },
-  { id: 'repayment', name: '還款', color: '#4ADE80' },
 ];
 
 const formatMoney = (amount) => {
