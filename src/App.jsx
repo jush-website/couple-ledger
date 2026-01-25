@@ -30,8 +30,9 @@ const firebaseConfig = {
 
 // --- API Helpers ---
 // 使用 Gemini 2.5 Flash Vision 進行收據辨識
-const analyzeReceiptImage = async (base64Image) => {
-    const apiKey = ""; // Runtime environment key
+const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
+    // 使用您提供的 API Key
+    const apiKey = "AIzaSyAVr-jNp2WiiAauPoscBNuDkF-wlg2QofA"; 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
     const prompt = `
@@ -55,7 +56,7 @@ const analyzeReceiptImage = async (base64Image) => {
         contents: [{
             parts: [
                 { text: prompt },
-                { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+                { inlineData: { mimeType: mimeType, data: base64Image } }
             ]
         }],
         generationConfig: {
@@ -69,10 +70,21 @@ const analyzeReceiptImage = async (base64Image) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+        
+        if (!response.ok) {
+            const errData = await response.json();
+            console.error("Gemini API Error:", errData);
+            throw new Error(`API Error: ${errData.error?.message || response.statusText}`);
+        }
+
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("No response from AI");
-        return JSON.parse(text);
+        
+        if (!text) throw new Error("No response content from AI");
+        
+        // Clean up markdown code blocks if present
+        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleanText);
     } catch (error) {
         console.error("AI Analysis Failed:", error);
         throw error;
@@ -940,31 +952,46 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
     const [image, setImage] = useState(null);
     const [scannedData, setScannedData] = useState(null);
     const [selectedItems, setSelectedItems] = useState({});
-    
+    const [errorMsg, setErrorMsg] = useState(null);
+
     const handleFile = (e) => {
         const file = e.target.files[0];
         if(!file) return;
         const reader = new FileReader();
         reader.onloadend = () => {
             setImage(reader.result);
-            processImage(reader.result.split(',')[1]);
+            // Extract mime type from result: "data:image/png;base64,..."
+            const match = reader.result.match(/^data:(.*?);base64,(.*)$/);
+            if (match) {
+                 const mimeType = match[1];
+                 const base64Data = match[2];
+                 processImage(base64Data, mimeType);
+            } else {
+                 // Fallback
+                 const base64Data = reader.result.split(',')[1];
+                 processImage(base64Data, "image/jpeg");
+            }
         };
         reader.readAsDataURL(file);
     };
 
-    const processImage = async (base64) => {
+    const processImage = async (base64, mimeType) => {
         setStep('analyzing');
+        setErrorMsg(null);
         try {
-            const result = await analyzeReceiptImage(base64);
+            const result = await analyzeReceiptImage(base64, mimeType);
             setScannedData(result);
             // Default select all
             const initialSel = {};
-            result.items.forEach((_, i) => initialSel[i] = true);
+            if (result.items && result.items.length > 0) {
+                 result.items.forEach((_, i) => initialSel[i] = true);
+            }
             setSelectedItems(initialSel);
             setStep('review');
         } catch (e) {
-            alert("辨識失敗，請重試或手動輸入");
-            onClose();
+            console.error(e);
+            setErrorMsg("辨識失敗，可能是圖片格式不支援或 AI 無回應。");
+            // Allow retry
         }
     };
 
@@ -991,7 +1018,7 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
 
     return (
         <ModalLayout title="AI 智慧收據辨識" onClose={onClose}>
-            {step === 'upload' && (
+            {step === 'upload' && !errorMsg && (
                 <div className="flex flex-col items-center justify-center h-64 gap-4">
                     <label className="w-full h-full flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors">
                         <div className="bg-purple-100 p-4 rounded-full mb-3 text-purple-600">
@@ -1004,7 +1031,7 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
                 </div>
             )}
             
-            {step === 'analyzing' && (
+            {step === 'analyzing' && !errorMsg && (
                 <div className="flex flex-col items-center justify-center h-64 gap-4">
                     <Loader2 size={48} className="animate-spin text-purple-500" />
                     <div className="text-center">
@@ -1014,7 +1041,20 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
                 </div>
             )}
 
-            {step === 'review' && scannedData && (
+            {errorMsg && (
+                 <div className="flex flex-col items-center justify-center h-64 gap-4">
+                    <div className="bg-red-100 p-4 rounded-full mb-3 text-red-500">
+                        <X size={32} />
+                    </div>
+                    <h3 className="font-bold text-gray-800">糟糕，出錯了</h3>
+                    <p className="text-xs text-red-400 mt-1 text-center px-4">{errorMsg}</p>
+                    <button onClick={() => { setStep('upload'); setErrorMsg(null); }} className="px-6 py-2 bg-gray-900 text-white rounded-xl text-sm font-bold mt-2">
+                        重試
+                    </button>
+                </div>
+            )}
+
+            {step === 'review' && scannedData && !errorMsg && (
                 <div className="space-y-4">
                     <div className="flex justify-between items-center text-sm font-bold text-gray-500 bg-gray-100 p-2 rounded-lg">
                         <span>日期: {scannedData.date}</span>
