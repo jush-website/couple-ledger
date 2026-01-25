@@ -6,16 +6,18 @@ import {
   writeBatch, query, where, getDocs
 } from 'firebase/firestore';
 import { 
-  getAuth, signInAnonymously, onAuthStateChanged 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
-  ArrowLeft, Check, History, Percent, Book, MoreHorizontal
+  ArrowLeft, Check, History, Percent, Book, MoreHorizontal,
+  Camera, Archive, Reply, Loader2, Image as ImageIcon
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
+// 使用您的設定
 const firebaseConfig = {
   apiKey: "AIzaSyDPUjZ1dUV52O7JUeY-7befolezIWpI6vo",
   authDomain: "money-49190.firebaseapp.com",
@@ -24,6 +26,57 @@ const firebaseConfig = {
   messagingSenderId: "706278541664",
   appId: "1:706278541664:web:aef08ba776587a1101b605",
   measurementId: "G-XD01TYP1PQ"
+};
+
+// --- API Helpers ---
+// 使用 Gemini 2.5 Flash Vision 進行收據辨識
+const analyzeReceiptImage = async (base64Image) => {
+    const apiKey = ""; // Runtime environment key
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    
+    const prompt = `
+    Analyze this receipt image. 
+    1. Identify the date (YYYY-MM-DD format).
+    2. List all items with their prices. 
+    3. Translate item names to Traditional Chinese (Taiwan usage).
+    4. Categorize each item into one of these IDs: 'food', 'transport', 'entertainment', 'shopping', 'house', 'travel', 'other'.
+    5. Return ONLY valid JSON in this format:
+    {
+      "date": "YYYY-MM-DD",
+      "items": [
+        { "name": "Item Name in TW Chinese", "price": 100, "category": "food" }
+      ],
+      "total": 100
+    }
+    If date is unclear, use today. If category is unclear, use 'other'.
+    `;
+
+    const payload = {
+        contents: [{
+            parts: [
+                { text: prompt },
+                { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+            ]
+        }],
+        generationConfig: {
+            responseMimeType: "application/json"
+        }
+    };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("No response from AI");
+        return JSON.parse(text);
+    } catch (error) {
+        console.error("AI Analysis Failed:", error);
+        throw error;
+    }
 };
 
 let app;
@@ -205,7 +258,10 @@ export default function CoupleLedgerApp() {
   const [transactions, setTransactions] = useState([]);
   const [jars, setJars] = useState([]);
   const [books, setBooks] = useState([]);
+  
+  // Book filtering states
   const [activeBookId, setActiveBookId] = useState(null);
+  const [viewArchived, setViewArchived] = useState(false);
 
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null); 
@@ -213,10 +269,11 @@ export default function CoupleLedgerApp() {
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
   const [showJarHistory, setShowJarHistory] = useState(null); 
-  
+   
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
-  
+  const [showScanner, setShowScanner] = useState(false);
+   
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
 
@@ -227,7 +284,19 @@ export default function CoupleLedgerApp() {
       document.head.appendChild(script);
     }
     const timer = setTimeout(() => setLoading(false), 2000);
-    const initAuth = async () => { try { await signInAnonymously(auth); } catch (e) { console.error(e); } };
+    const initAuth = async () => { 
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            try { 
+                await signInWithCustomToken(auth, __initial_auth_token); 
+            } catch(e) { 
+                console.warn("Custom token failed, attempting anonymous sign-in:", e);
+                // Fallback to anonymous sign in if custom token fails
+                try { await signInAnonymously(auth); } catch (e2) { console.error("Anonymous fallback failed:", e2); }
+            }
+        } else {
+            try { await signInAnonymously(auth); } catch (e) { console.error("Anonymous sign-in failed:", e); } 
+        }
+    };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
     const savedRole = localStorage.getItem('couple_app_role');
@@ -251,18 +320,22 @@ export default function CoupleLedgerApp() {
             
             // If no books exist, create default one
             if (data.length === 0 && !s.metadata.hasPendingWrites) {
-               await addDoc(booksRef, { name: "預設帳本", createdAt: serverTimestamp() });
+               await addDoc(booksRef, { name: "預設帳本", status: 'active', createdAt: serverTimestamp() });
                return; 
             }
             
             setBooks(data);
-            // Set active book if not set or invalid
-            if (data.length > 0) {
-               setActiveBookId(prev => {
-                   if (!prev || !data.find(b => b.id === prev)) return data[0].id;
-                   return prev;
-               });
-            }
+            
+            // Set active book intelligently
+            setActiveBookId(prev => {
+                // If current selection is valid, keep it
+                if (prev && data.find(b => b.id === prev)) return prev;
+                // Otherwise find first active book
+                const firstActive = data.find(b => (b.status || 'active') === 'active');
+                if (firstActive) return firstActive.id;
+                // Fallback to first book (even if archived)
+                return data[0]?.id || null;
+            });
         });
 
         const unsubTrans = onSnapshot(transRef, (s) => {
@@ -288,15 +361,21 @@ export default function CoupleLedgerApp() {
   // Derived filtered transactions based on Active Book
   const filteredTransactions = useMemo(() => {
       if (!activeBookId) return [];
-      // If a transaction has a bookId, match it. 
-      // If it doesn't have a bookId (legacy data), assign it to the FIRST book in the list (usually "預設帳本")
       const defaultBookId = books[0]?.id;
       return transactions.filter(t => {
           if (t.bookId) return t.bookId === activeBookId;
-          // Legacy data handling: show in the default book
+          // Legacy data handling
           return activeBookId === defaultBookId;
       });
   }, [transactions, activeBookId, books]);
+
+  // Derived filtered books based on view mode (Active vs Archived)
+  const displayBooks = useMemo(() => {
+      return books.filter(b => {
+          const status = b.status || 'active';
+          return viewArchived ? status === 'archived' : status === 'active';
+      });
+  }, [books, viewArchived]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -420,19 +499,19 @@ export default function CoupleLedgerApp() {
   };
 
   // --- Book Actions ---
-  const handleSaveBook = async (name) => {
+  const handleSaveBook = async (name, status = 'active') => {
       if(!user || !name.trim()) return;
       try {
           if(editingBook) {
               await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', editingBook.id), {
-                  name, updatedAt: serverTimestamp()
+                  name, status, updatedAt: serverTimestamp()
               });
-              showToast('帳本名稱已更新 ✨');
+              showToast('帳本已更新 ✨');
           } else {
               const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'books'), {
-                  name, createdAt: serverTimestamp()
+                  name, status, createdAt: serverTimestamp()
               });
-              setActiveBookId(docRef.id); // Auto switch to new book
+              setActiveBookId(docRef.id); 
               showToast('新帳本已建立 📘');
           }
           setShowBookManager(false);
@@ -441,12 +520,13 @@ export default function CoupleLedgerApp() {
   };
 
   const handleDeleteBook = async (bookId) => {
-      if(books.length <= 1) {
-          showToast('至少需要保留一個帳本 ⚠️');
+      // Don't check length if deleting archived
+      if(books.filter(b => (b.status||'active') === 'active').length <= 1 && editingBook?.status !== 'archived') {
+          showToast('至少需要保留一個使用中的帳本 ⚠️');
           return;
       }
       setConfirmModal({
-        isOpen: true, title: "刪除帳本", message: "確定要刪除這個帳本嗎？裡面的記帳紀錄也會一併刪除喔！(此動作無法復原)", isDanger: true,
+        isOpen: true, title: "刪除帳本", message: "確定要永久刪除這個帳本嗎？裡面的記帳紀錄也會一併刪除！(無法復原)", isDanger: true,
         onConfirm: async () => {
             try {
                 // Delete the book doc
@@ -461,7 +541,7 @@ export default function CoupleLedgerApp() {
 
                 // If deleting active book, switch to another
                 if(activeBookId === bookId) {
-                    const remaining = books.filter(b => b.id !== bookId);
+                    const remaining = books.filter(b => b.id !== bookId && (b.status||'active') === 'active');
                     if(remaining.length > 0) setActiveBookId(remaining[0].id);
                 }
                 
@@ -470,6 +550,17 @@ export default function CoupleLedgerApp() {
             } catch(e) { console.error(e); }
         }
       });
+  };
+
+  const handleScanComplete = (scannedItem) => {
+      setEditingTransaction({
+          amount: scannedItem.amount,
+          note: scannedItem.note,
+          category: scannedItem.category,
+          date: scannedItem.date || new Date().toISOString().split('T')[0],
+      });
+      setShowScanner(false);
+      setShowAddTransaction(true);
   };
 
 
@@ -485,36 +576,72 @@ export default function CoupleLedgerApp() {
             <div className="bg-white/20 p-2 rounded-full backdrop-blur-md"><Heart className="fill-white animate-pulse" size={18} /></div>
             <h1 className="text-lg font-bold tracking-wide">我們的小金庫</h1>
           </div>
-          <div className="text-xs bg-black/10 px-3 py-1 rounded-full">{role === 'bf' ? '👦 男朋友' : '👧 女朋友'}</div>
+          <div className="flex items-center gap-3">
+              {/* Archive Toggle */}
+              {activeTab === 'overview' && (
+                  <button 
+                    onClick={() => setViewArchived(!viewArchived)}
+                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${viewArchived ? 'bg-white text-gray-800 border-white' : 'bg-transparent text-white/80 border-white/30'}`}
+                  >
+                      {viewArchived ? <Archive size={12}/> : <Book size={12}/>}
+                      {viewArchived ? '歷史帳本' : '使用中'}
+                  </button>
+              )}
+              <div className="text-xs bg-black/10 px-3 py-1 rounded-full">{role === 'bf' ? '👦 男朋友' : '👧 女朋友'}</div>
+          </div>
         </div>
       </div>
 
       <div className="max-w-2xl mx-auto p-4">
         {/* Book Selector UI (Only on Overview) */}
         {activeTab === 'overview' && (
-             <div className="mb-4 flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
-                 {books.map(book => (
-                     <button 
-                        key={book.id} 
-                        onClick={() => setActiveBookId(book.id)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all shadow-sm ${activeBookId === book.id ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
-                     >
-                         <Book size={14} />
-                         {book.name}
-                         {activeBookId === book.id && (
-                             <div onClick={(e) => { e.stopPropagation(); setEditingBook(book); setShowBookManager(true); }} className="ml-1 p-1 rounded-full hover:bg-white/20">
-                                 <Settings size={12} />
-                             </div>
-                         )}
-                     </button>
-                 ))}
-                 <button onClick={() => { setEditingBook(null); setShowBookManager(true); }} className="px-3 py-2 bg-white text-gray-400 rounded-xl shadow-sm hover:bg-gray-50">
-                     <Plus size={18} />
-                 </button>
+             <div className="mb-4">
+                 {viewArchived && <div className="text-xs text-gray-400 mb-2 font-bold flex items-center gap-1"><Archive size={12}/> 歷史封存區 (唯讀模式)</div>}
+                 <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
+                     {displayBooks.map(book => (
+                         <button 
+                           key={book.id} 
+                           onClick={() => setActiveBookId(book.id)}
+                           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all shadow-sm ${activeBookId === book.id ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+                         >
+                             <Book size={14} />
+                             {book.name}
+                             {activeBookId === book.id && (
+                                 <div onClick={(e) => { e.stopPropagation(); setEditingBook(book); setShowBookManager(true); }} className="ml-1 p-1 rounded-full hover:bg-white/20">
+                                     <Settings size={12} />
+                                 </div>
+                             )}
+                         </button>
+                     ))}
+                     {!viewArchived && (
+                         <button onClick={() => { setEditingBook(null); setShowBookManager(true); }} className="px-3 py-2 bg-white text-gray-400 rounded-xl shadow-sm hover:bg-gray-50">
+                             <Plus size={18} />
+                         </button>
+                     )}
+                     {displayBooks.length === 0 && <div className="text-gray-400 text-sm italic py-2">沒有{viewArchived ? '封存' : '使用中'}的帳本</div>}
+                 </div>
              </div>
         )}
         
-        {activeTab === 'overview' && <Overview transactions={filteredTransactions} role={role} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onEdit={(t) => { setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={handleDeleteTransaction} />}
+        {activeTab === 'overview' && (
+            <Overview 
+                transactions={filteredTransactions} 
+                role={role} 
+                readOnly={viewArchived}
+                onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
+                onScan={() => setShowScanner(true)}
+                onEdit={(t) => { 
+                    if(viewArchived) return; // Read only
+                    setEditingTransaction(t); 
+                    setShowAddTransaction(true); 
+                }} 
+                onDelete={(id) => {
+                    if(viewArchived) return;
+                    handleDeleteTransaction(id);
+                }} 
+            />
+        )}
+
         {activeTab === 'stats' && (
             <div>
                 <div className="bg-white px-4 py-2 rounded-xl shadow-sm mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600">
@@ -555,6 +682,7 @@ export default function CoupleLedgerApp() {
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
+      {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
       
       {showBookManager && (
           <BookManagerModal 
@@ -587,7 +715,7 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
+const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnly }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
     transactions.forEach(t => {
@@ -629,12 +757,24 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
       </div>
 
       <div className="space-y-4">
-        <div className="flex justify-between items-end px-2"><h3 className="font-bold text-lg text-gray-800">最近紀錄</h3><button onClick={onAdd} className="bg-gray-900 text-white p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform"><Plus size={20} /></button></div>
+        <div className="flex justify-between items-end px-2">
+            <h3 className="font-bold text-lg text-gray-800">最近紀錄</h3>
+            {!readOnly && (
+                <div className="flex gap-2">
+                    <button onClick={onScan} className="bg-purple-100 text-purple-600 p-3 rounded-xl shadow-sm active:scale-90 transition-transform">
+                        <Camera size={20} />
+                    </button>
+                    <button onClick={onAdd} className="bg-gray-900 text-white p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform">
+                        <Plus size={20} />
+                    </button>
+                </div>
+            )}
+        </div>
         {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, items]) => (
             <div key={date} className="space-y-2">
               <div className="text-xs font-bold text-gray-400 ml-2 bg-gray-100 inline-block px-2 py-1 rounded-md">{date}</div>
               {items.map(t => (
-                <div key={t.id} onClick={() => onEdit(t)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between active:bg-gray-50 transition-colors">
+                <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between transition-colors ${readOnly ? '' : 'active:bg-gray-50'}`}>
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
                     <div className="min-w-0 flex-1">
@@ -644,7 +784,10 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete }) => {
                         </span></div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 flex-shrink-0"><span className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{formatMoney(t.amount)}</span><button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="text-gray-300 hover:text-red-400 p-1"><Trash2 size={16} /></button></div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-500' : 'text-gray-800'}`}>{formatMoney(t.amount)}</span>
+                      {!readOnly && <button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="text-gray-300 hover:text-red-400 p-1"><Trash2 size={16} /></button>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -734,9 +877,10 @@ const ModalLayout = ({ title, onClose, children }) => (
   </div>
 );
 
-// --- New Component: Book Manager ---
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
+    // If no status, it's a legacy active book
+    const [isArchived, setIsArchived] = useState(initialData?.status === 'archived');
     
     return (
         <ModalLayout title={initialData ? "編輯帳本" : "新增帳本"} onClose={onClose}>
@@ -753,12 +897,29 @@ const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
                     />
                 </div>
                 
+                {initialData && (
+                    <div className="bg-orange-50 p-3 rounded-xl border border-orange-100">
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm font-bold text-orange-800 flex items-center gap-2"><Archive size={16}/> 封存此帳本?</span>
+                            <button 
+                                onClick={() => setIsArchived(!isArchived)} 
+                                className={`w-12 h-6 rounded-full transition-colors relative ${isArchived ? 'bg-orange-400' : 'bg-gray-300'}`}
+                            >
+                                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${isArchived ? 'left-7' : 'left-1'}`}></div>
+                            </button>
+                        </div>
+                        <p className="text-xs text-orange-600 mt-2">
+                            {isArchived ? '此帳本將移至歷史區，主畫面將隱藏。' : '此帳本目前正在使用中。'}
+                        </p>
+                    </div>
+                )}
+                
                 <button 
-                    onClick={() => onSave(name)}
+                    onClick={() => onSave(name, isArchived ? 'archived' : 'active')}
                     disabled={!name.trim()}
                     className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform"
                 >
-                    儲存
+                    儲存變更
                 </button>
 
                 {initialData && (
@@ -766,10 +927,133 @@ const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
                         onClick={() => onDelete(initialData.id)}
                         className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100"
                     >
-                        <Trash2 size={16} /> 刪除此帳本
+                        <Trash2 size={16} /> 永久刪除
                     </button>
                 )}
             </div>
+        </ModalLayout>
+    );
+};
+
+const ReceiptScannerModal = ({ onClose, onConfirm }) => {
+    const [step, setStep] = useState('upload'); // upload, analyzing, review
+    const [image, setImage] = useState(null);
+    const [scannedData, setScannedData] = useState(null);
+    const [selectedItems, setSelectedItems] = useState({});
+    
+    const handleFile = (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setImage(reader.result);
+            processImage(reader.result.split(',')[1]);
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const processImage = async (base64) => {
+        setStep('analyzing');
+        try {
+            const result = await analyzeReceiptImage(base64);
+            setScannedData(result);
+            // Default select all
+            const initialSel = {};
+            result.items.forEach((_, i) => initialSel[i] = true);
+            setSelectedItems(initialSel);
+            setStep('review');
+        } catch (e) {
+            alert("辨識失敗，請重試或手動輸入");
+            onClose();
+        }
+    };
+
+    const toggleItem = (idx) => {
+        setSelectedItems(prev => ({ ...prev, [idx]: !prev[idx] }));
+    };
+
+    const handleConfirm = () => {
+        const itemsToImport = scannedData.items.filter((_, i) => selectedItems[i]);
+        const total = itemsToImport.reduce((acc, curr) => acc + curr.price, 0);
+        // Concatenate names for the note
+        const note = itemsToImport.map(i => i.name).join(', ').substring(0, 50) + (itemsToImport.length > 2 ? '...' : '');
+        // Determine category (simple logic: mostly food -> food)
+        const categories = itemsToImport.map(i => i.category);
+        const modeCategory = categories.sort((a,b) => categories.filter(v=>v===a).length - categories.filter(v=>v===b).length).pop();
+        
+        onConfirm({
+            amount: total,
+            note: note || "收據匯入",
+            category: modeCategory || 'other',
+            date: scannedData.date || new Date().toISOString().split('T')[0]
+        });
+    };
+
+    return (
+        <ModalLayout title="AI 智慧收據辨識" onClose={onClose}>
+            {step === 'upload' && (
+                <div className="flex flex-col items-center justify-center h-64 gap-4">
+                    <label className="w-full h-full flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors">
+                        <div className="bg-purple-100 p-4 rounded-full mb-3 text-purple-600">
+                            <Camera size={32} />
+                        </div>
+                        <span className="font-bold text-gray-600">拍照或上傳收據</span>
+                        <span className="text-xs text-gray-400 mt-2">支援自動翻譯與分類</span>
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+                    </label>
+                </div>
+            )}
+            
+            {step === 'analyzing' && (
+                <div className="flex flex-col items-center justify-center h-64 gap-4">
+                    <Loader2 size={48} className="animate-spin text-purple-500" />
+                    <div className="text-center">
+                        <h3 className="font-bold text-gray-800">正在分析收據...</h3>
+                        <p className="text-xs text-gray-400 mt-1">AI 正在辨識品項並翻譯成中文</p>
+                    </div>
+                </div>
+            )}
+
+            {step === 'review' && scannedData && (
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center text-sm font-bold text-gray-500 bg-gray-100 p-2 rounded-lg">
+                        <span>日期: {scannedData.date}</span>
+                        <span>總計: {formatMoney(scannedData.total)}</span>
+                    </div>
+                    
+                    <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                        <div className="text-xs text-gray-400 px-1">請勾選要匯入的項目：</div>
+                        {scannedData.items.map((item, idx) => (
+                            <div key={idx} onClick={() => toggleItem(idx)} className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${selectedItems[idx] ? 'border-purple-500 bg-purple-50' : 'border-gray-100 bg-white opacity-60'}`}>
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedItems[idx] ? 'bg-purple-500 border-purple-500' : 'border-gray-300'}`}>
+                                        {selectedItems[idx] && <Check size={12} className="text-white" />}
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-sm text-gray-800">{item.name}</div>
+                                        <div className="text-[10px] text-gray-500 flex gap-1 items-center">
+                                            <span className="bg-gray-200 px-1 rounded">{CATEGORIES.find(c=>c.id===item.category)?.name || '其他'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="font-bold text-gray-700">{formatMoney(item.price)}</div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="border-t border-gray-100 pt-3">
+                        <div className="flex justify-between items-center mb-3">
+                            <span className="text-sm font-bold text-gray-500">選取金額合計</span>
+                            <span className="text-xl font-black text-purple-600">
+                                {formatMoney(scannedData.items.reduce((acc, item, i) => selectedItems[i] ? acc + item.price : acc, 0))}
+                            </span>
+                        </div>
+                        <button onClick={handleConfirm} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-transform">
+                            匯入並前往分帳
+                        </button>
+                    </div>
+                </div>
+            )}
         </ModalLayout>
     );
 };
@@ -781,10 +1065,10 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   const [category, setCategory] = useState(initialData?.category || 'food');
   const [paidBy, setPaidBy] = useState(initialData?.paidBy || currentUserRole);
   const [splitType, setSplitType] = useState(initialData?.splitType || 'shared');
-  
+   
   const [customBf, setCustomBf] = useState(initialData?.splitDetails?.bf || '');
   const [customGf, setCustomGf] = useState(initialData?.splitDetails?.gf || '');
-  
+   
   // Slider state
   const [ratioValue, setRatioValue] = useState(
       initialData?.splitType === 'ratio' && initialData.amount 
