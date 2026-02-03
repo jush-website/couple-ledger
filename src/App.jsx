@@ -43,7 +43,7 @@ const CATEGORIES = [
   { id: 'shopping', name: '購物', color: '#0088FE' },
   { id: 'house', name: '居家', color: '#8884d8' },
   { id: 'travel', name: '旅遊', color: '#FF6B6B' },
-  { id: 'repayment', name: '還款', color: '#10B981' }, // 新增還款類別
+  { id: 'repayment', name: '還款', color: '#10B981' },
   { id: 'other', name: '其他', color: '#999' },
 ];
 
@@ -143,6 +143,7 @@ export default function CoupleLedgerApp() {
   const [books, setBooks] = useState([]);
   const [activeBookId, setActiveBookId] = useState(null);
   const [viewArchived, setViewArchived] = useState(false);
+  
   const [showAddTransaction, setShowAddTransaction] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null); 
   const [showAddJar, setShowAddJar] = useState(false);
@@ -152,6 +153,8 @@ export default function CoupleLedgerApp() {
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
+  const [showRepayModal, setShowRepayModal] = useState(false); // 新增還款 Modal 控制
+  
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
 
@@ -203,6 +206,24 @@ export default function CoupleLedgerApp() {
       return transactions.filter(t => t.bookId ? t.bookId === activeBookId : activeBookId === books[0]?.id);
   }, [transactions, activeBookId, books]);
 
+  const debtValue = useMemo(() => {
+    let bfLent = 0;
+    filteredTransactions.forEach(t => {
+      const amt = Number(t.amount) || 0;
+      if (t.category === 'repayment') {
+          t.paidBy === 'bf' ? bfLent += amt : bfLent -= amt;
+      } else {
+        let gfS = 0, bfS = 0;
+        if (['custom', 'ratio'].includes(t.splitType) && t.splitDetails) { gfS = t.splitDetails.gf; bfS = t.splitDetails.bf; }
+        else if (t.splitType === 'shared') { gfS = amt/2; bfS = amt/2; }
+        else if (t.splitType === 'gf_personal') gfS = amt;
+        else if (t.splitType === 'bf_personal') bfS = amt;
+        t.paidBy === 'bf' ? bfLent += gfS : bfLent -= bfS;
+      }
+    });
+    return bfLent;
+  }, [filteredTransactions]);
+
   const displayBooks = useMemo(() => books.filter(b => viewArchived ? (b.status === 'archived') : (b.status || 'active') === 'active'), [books, viewArchived]);
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -212,7 +233,7 @@ export default function CoupleLedgerApp() {
     const cleanData = { ...data, amount: finalAmt, bookId: activeBookId };
     if (editingTransaction) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
     else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...cleanData, createdAt: serverTimestamp() });
-    setShowAddTransaction(false); setEditingTransaction(null); showToast('已儲存紀錄 ✨');
+    setShowAddTransaction(false); setEditingTransaction(null); setShowRepayModal(false); showToast('已儲存紀錄 ✨');
   };
 
   const depositToJar = async (jarId, amount, contributorRole) => {
@@ -264,13 +285,14 @@ export default function CoupleLedgerApp() {
         {activeTab === 'overview' && (
           <Overview 
             transactions={filteredTransactions} 
+            debt={debtValue}
             role={role} 
             readOnly={viewArchived} 
             onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
             onScan={() => setShowScanner(true)} 
             onEdit={(t) => { if(!viewArchived) { setEditingTransaction(t); setShowAddTransaction(true); } }} 
             onDelete={(id) => !viewArchived && deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id))} 
-            onRepay={handleSaveTransaction}
+            onRepay={() => setShowRepayModal(true)}
           />
         )}
         {activeTab === 'stats' && <Statistics transactions={filteredTransactions} />}
@@ -278,8 +300,10 @@ export default function CoupleLedgerApp() {
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
       <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50"><div className="flex justify-around py-3 max-w-2xl mx-auto"><NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} /><NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} /><NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} /><NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} /></div></div>
-      {toast && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3"><CheckCircle size={18} className="text-green-400" />{toast}</div>}
+      {toast && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-fade-in"><CheckCircle size={18} className="text-green-400" />{toast}</div>}
+      
       {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
+      {showRepayModal && <RepayModal debt={debtValue} onClose={() => setShowRepayModal(false)} onSave={handleSaveTransaction} />}
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={(n,t) => { if(editingJar) { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), { name: n, targetAmount: Number(t) }); } else { addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), { name: n, targetAmount: Number(t), currentAmount: 0, contributions: { bf: 0, gf: 0 }, history: [], createdAt: serverTimestamp() }); } setShowAddJar(false); }} initialData={editingJar} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} />}
@@ -297,26 +321,7 @@ const RoleSelection = ({ onSelect }) => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 text-center"><div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm"><h1 className="text-2xl font-bold mb-6">歡迎使用小金庫</h1><div className="space-y-4"><button onClick={() => onSelect('bf')} className="w-full py-4 bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-200">我是男朋友 👦</button><button onClick={() => onSelect('gf')} className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold shadow-lg shadow-pink-200">我是女朋友 👧</button></div></div></div>
 );
 
-const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnly, onRepay }) => {
-  const debt = useMemo(() => {
-    let bfLent = 0;
-    transactions.forEach(t => {
-      const amt = Number(t.amount) || 0;
-      if (t.category === 'repayment') {
-          // 還款邏輯：若男友還錢，其餘額增加；若女友還錢，男友餘額減少
-          t.paidBy === 'bf' ? bfLent += amt : bfLent -= amt;
-      } else {
-        let gfS = 0, bfS = 0;
-        if (['custom', 'ratio'].includes(t.splitType) && t.splitDetails) { gfS = t.splitDetails.gf; bfS = t.splitDetails.bf; }
-        else if (t.splitType === 'shared') { gfS = amt/2; bfS = amt/2; }
-        else if (t.splitType === 'gf_personal') gfS = amt;
-        else if (t.splitType === 'bf_personal') bfS = amt;
-        t.paidBy === 'bf' ? bfLent += gfS : bfLent -= bfS;
-      }
-    });
-    return bfLent;
-  }, [transactions]);
-
+const Overview = ({ transactions, debt, role, onAdd, onEdit, onDelete, onScan, readOnly, onRepay }) => {
   const grouped = useMemo(() => {
     const groups = {};
     transactions.forEach(t => { 
@@ -324,7 +329,6 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
         if (!groups[t.date]) groups[t.date] = { items: [], bfShareTotal: 0, gfShareTotal: 0 };
         groups[t.date].items.push(t);
         
-        // 實質支出邏輯：計算每個人在該筆消費中的「應付金額」
         if (t.category !== 'repayment') {
             const amt = Number(t.amount) || 0;
             let bfS = 0, gfS = 0;
@@ -342,26 +346,8 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
     return Object.entries(groups).sort((a, b) => new Date(b[0]) - new Date(a[0]));
   }, [transactions]);
 
-  const handleRepayClick = () => {
-      if (Math.abs(debt) < 1) return;
-      const amountToRepay = Math.abs(debt);
-      const payer = debt > 0 ? 'gf' : 'bf'; // 男友餘額正數代表女友欠錢，女友付錢
-      const receiver = payer === 'bf' ? '女朋友' : '男朋友';
-      
-      if (window.confirm(`確定要產生一筆 ${receiver} 收到的 ${formatMoney(amountToRepay)} 還款紀錄嗎？`)) {
-          onRepay({
-              amount: amountToRepay,
-              note: "還款結清",
-              category: "repayment",
-              paidBy: payer,
-              splitType: "shared", // 還款類別不影響分帳，設定預設即可
-              date: new Date().toISOString().split('T')[0]
-          });
-      }
-  };
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div className="bg-white p-6 rounded-3xl shadow-sm border text-center relative overflow-hidden">
         <div className={`absolute top-0 left-0 w-full h-1 ${Math.abs(debt) < 1 ? 'bg-green-400' : (debt > 0 ? 'bg-blue-400' : 'bg-pink-400')}`}></div>
         <div className="text-gray-400 text-xs font-bold mb-2 uppercase tracking-widest">目前結算</div>
@@ -374,10 +360,10 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
                 </div>
                 {!readOnly && (
                     <button 
-                        onClick={handleRepayClick}
+                        onClick={onRepay}
                         className="bg-green-500 text-white px-6 py-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 mx-auto shadow-md hover:bg-green-600 active:scale-95 transition-all"
                     >
-                        <ArrowRightLeft size={16}/> 結清還款
+                        <ArrowRightLeft size={16}/> 我要還款
                     </button>
                 )}
             </div>
@@ -395,7 +381,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
                   </div>
               </div>
               {data.items.map(t => (
-                <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:bg-gray-50 transition-colors ${t.category === 'repayment' ? 'border-l-4 border-l-green-500' : ''}`}>
+                <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:bg-gray-50 transition-colors ${t.category === 'repayment' ? 'border-l-4 border-l-green-500 bg-green-50/30' : ''}`}>
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-sm" style={{ background: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>
                         {t.category === 'repayment' ? <ArrowRightLeft size={18}/> : (t.category === 'food' ? '🍔' : '🏷️')}
@@ -419,6 +405,52 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
       </div>
     </div>
   );
+};
+
+// --- NEW REPAYMENT MODAL ---
+const RepayModal = ({ debt, onClose, onSave }) => {
+    const [amount, setAmount] = useState(Math.abs(debt).toString());
+    const payer = debt > 0 ? 'gf' : 'bf'; // 男友餘額正數代表女友欠錢，女友付錢
+    const receiverName = payer === 'bf' ? '女朋友' : '男朋友';
+    const payerName = payer === 'bf' ? '男朋友' : '女朋友';
+
+    return (
+        <ModalLayout title="結清還款" onClose={onClose}>
+            <div className="space-y-4 pt-2">
+                <div className="bg-gray-50 p-4 rounded-2xl border text-center">
+                    <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">目前欠款總額</div>
+                    <div className="text-2xl font-black text-gray-800">{formatMoney(Math.abs(debt))}</div>
+                    <div className="text-[10px] text-orange-500 font-bold mt-1">
+                        需由 <span className="underline">{payerName}</span> 還給 <span className="underline">{receiverName}</span>
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <label className="block text-[10px] font-bold text-gray-400 px-1 uppercase tracking-widest text-center">本次還款金額</label>
+                    <div className="bg-green-50 p-4 rounded-2xl text-center font-black text-4xl text-green-600 shadow-inner h-16 flex items-center justify-center">
+                        {amount ? formatMoney(amount) : '$0'}
+                    </div>
+                </div>
+
+                <CalculatorKeypad 
+                    value={amount} 
+                    onChange={setAmount} 
+                    onConfirm={(val) => {
+                        if (Number(val) <= 0) return;
+                        onSave({
+                            amount: Number(val),
+                            note: "還款紀錄",
+                            category: "repayment",
+                            paidBy: payer,
+                            splitType: "shared",
+                            date: new Date().toISOString().split('T')[0]
+                        });
+                    }} 
+                    compact 
+                />
+            </div>
+        </ModalLayout>
+    );
 };
 
 const Statistics = ({ transactions }) => {
