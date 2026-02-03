@@ -156,6 +156,7 @@ export default function CoupleLedgerApp() {
   const [showRepayModal, setShowRepayModal] = useState(false);
   
   const [toast, setToast] = useState(null); 
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false });
 
   useEffect(() => {
     if (!document.querySelector('script[src*="tailwindcss"]')) {
@@ -235,6 +236,25 @@ export default function CoupleLedgerApp() {
     setShowAddTransaction(false); setEditingTransaction(null); setShowRepayModal(false); showToast('已儲存紀錄 ✨');
   };
 
+  // --- NEW: Delete Transaction Logic ---
+  const handleDeleteTransaction = (id) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "刪除紀錄",
+      message: "確定要刪除這筆紀錄嗎？此動作無法復原。",
+      isDanger: true,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
+          showToast('已刪除紀錄 🗑️');
+        } catch (e) {
+          showToast('刪除失敗，請重試');
+        }
+        setConfirmModal({ isOpen: false });
+      }
+    });
+  };
+
   const depositToJar = async (jarId, amount, contributorRole) => {
     const jar = jars.find(j => j.id === jarId);
     if (!jar) return;
@@ -290,6 +310,7 @@ export default function CoupleLedgerApp() {
             onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
             onScan={() => setShowScanner(true)} 
             onEdit={(t) => { if(!viewArchived) { setEditingTransaction(t); setShowAddTransaction(true); } }} 
+            onDelete={handleDeleteTransaction}
             onRepay={() => setShowRepayModal(true)}
           />
         )}
@@ -298,8 +319,22 @@ export default function CoupleLedgerApp() {
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
       <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50"><div className="flex justify-around py-3 max-w-2xl mx-auto"><NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} /><NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} /><NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} /><NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} /></div></div>
+      
       {toast && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-fade-in"><CheckCircle size={18} className="text-green-400" />{toast}</div>}
       
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm" onClick={(e) => e.target === e.currentTarget && setConfirmModal({ isOpen: false })}>
+          <div className="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl animate-fade-in">
+            <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
+            <p className="text-gray-500 text-sm mb-6">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmModal({ isOpen: false })} className="flex-1 py-3 bg-gray-100 rounded-xl text-sm font-bold text-gray-600">取消</button>
+              <button onClick={confirmModal.onConfirm} className={`flex-1 py-3 rounded-xl text-sm font-bold text-white ${confirmModal.isDanger ? 'bg-red-500' : 'bg-blue-500'}`}>確定</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
       {showRepayModal && <RepayModal debt={debtValue} onClose={() => setShowRepayModal(false)} onSave={handleSaveTransaction} />}
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={(n,t) => { if(editingJar) { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), { name: n, targetAmount: Number(t) }); } else { addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), { name: n, targetAmount: Number(t), currentAmount: 0, contributions: { bf: 0, gf: 0 }, history: [], createdAt: serverTimestamp() }); } setShowAddJar(false); }} initialData={editingJar} />}
@@ -319,7 +354,7 @@ const RoleSelection = ({ onSelect }) => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 text-center"><div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm"><h1 className="text-2xl font-bold mb-6">歡迎使用小金庫</h1><div className="space-y-4"><button onClick={() => onSelect('bf')} className="w-full py-4 bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-200">我是男朋友 👦</button><button onClick={() => onSelect('gf')} className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold shadow-lg shadow-pink-200">我是女朋友 👧</button></div></div></div>
 );
 
-const Overview = ({ transactions, debt, role, onAdd, onEdit, onScan, readOnly, onRepay }) => {
+const Overview = ({ transactions, debt, role, onAdd, onEdit, onScan, readOnly, onRepay, onDelete }) => {
   const grouped = useMemo(() => {
     const groups = {};
     transactions.forEach(t => { 
@@ -395,7 +430,17 @@ const Overview = ({ transactions, debt, role, onAdd, onEdit, onScan, readOnly, o
                         </div>
                     </div>
                   </div>
-                  <div className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-600' : 'text-gray-700'}`}>{formatMoney(t.amount)}</div>
+                  <div className="flex items-center gap-3">
+                      <div className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-600' : 'text-gray-700'}`}>{formatMoney(t.amount)}</div>
+                      {!readOnly && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                            className="p-1.5 text-gray-300 hover:text-red-500 transition-colors"
+                          >
+                              <Trash2 size={16} />
+                          </button>
+                      )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -430,8 +475,6 @@ const RepayModal = ({ debt, onClose, onSave }) => {
 
 const Statistics = ({ transactions }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  
-  // 保留各月份歷史紀錄的關鍵：根據 currentDate 過濾資料
   const monthTransactions = useMemo(() => transactions.filter(t => { 
     const d = new Date(t.date); 
     return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear() && t.category !== 'repayment'; 
@@ -495,7 +538,6 @@ const Statistics = ({ transactions }) => {
         </div>
       </div>
 
-      {/* 歷史詳細清單 */}
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
             <History size={18} className="text-gray-400"/>
