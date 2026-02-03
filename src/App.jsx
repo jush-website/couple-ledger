@@ -153,10 +153,9 @@ export default function CoupleLedgerApp() {
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
-  const [showRepayModal, setShowRepayModal] = useState(false); // 新增還款 Modal 控制
+  const [showRepayModal, setShowRepayModal] = useState(false);
   
   const [toast, setToast] = useState(null); 
-  const [confirmModal, setConfirmModal] = useState({ isOpen: false });
 
   useEffect(() => {
     if (!document.querySelector('script[src*="tailwindcss"]')) {
@@ -291,7 +290,6 @@ export default function CoupleLedgerApp() {
             onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
             onScan={() => setShowScanner(true)} 
             onEdit={(t) => { if(!viewArchived) { setEditingTransaction(t); setShowAddTransaction(true); } }} 
-            onDelete={(id) => !viewArchived && deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id))} 
             onRepay={() => setShowRepayModal(true)}
           />
         )}
@@ -321,7 +319,7 @@ const RoleSelection = ({ onSelect }) => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 text-center"><div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm"><h1 className="text-2xl font-bold mb-6">歡迎使用小金庫</h1><div className="space-y-4"><button onClick={() => onSelect('bf')} className="w-full py-4 bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-200">我是男朋友 👦</button><button onClick={() => onSelect('gf')} className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold shadow-lg shadow-pink-200">我是女朋友 👧</button></div></div></div>
 );
 
-const Overview = ({ transactions, debt, role, onAdd, onEdit, onDelete, onScan, readOnly, onRepay }) => {
+const Overview = ({ transactions, debt, role, onAdd, onEdit, onScan, readOnly, onRepay }) => {
   const grouped = useMemo(() => {
     const groups = {};
     transactions.forEach(t => { 
@@ -407,47 +405,24 @@ const Overview = ({ transactions, debt, role, onAdd, onEdit, onDelete, onScan, r
   );
 };
 
-// --- NEW REPAYMENT MODAL ---
 const RepayModal = ({ debt, onClose, onSave }) => {
     const [amount, setAmount] = useState(Math.abs(debt).toString());
-    const payer = debt > 0 ? 'gf' : 'bf'; // 男友餘額正數代表女友欠錢，女友付錢
+    const payer = debt > 0 ? 'gf' : 'bf'; 
     const receiverName = payer === 'bf' ? '女朋友' : '男朋友';
     const payerName = payer === 'bf' ? '男朋友' : '女朋友';
-
     return (
         <ModalLayout title="結清還款" onClose={onClose}>
             <div className="space-y-4 pt-2">
                 <div className="bg-gray-50 p-4 rounded-2xl border text-center">
                     <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">目前欠款總額</div>
                     <div className="text-2xl font-black text-gray-800">{formatMoney(Math.abs(debt))}</div>
-                    <div className="text-[10px] text-orange-500 font-bold mt-1">
-                        需由 <span className="underline">{payerName}</span> 還給 <span className="underline">{receiverName}</span>
-                    </div>
+                    <div className="text-[10px] text-orange-500 font-bold mt-1">需由 <span className="underline">{payerName}</span> 還給 <span className="underline">{receiverName}</span></div>
                 </div>
-
                 <div className="space-y-2">
                     <label className="block text-[10px] font-bold text-gray-400 px-1 uppercase tracking-widest text-center">本次還款金額</label>
-                    <div className="bg-green-50 p-4 rounded-2xl text-center font-black text-4xl text-green-600 shadow-inner h-16 flex items-center justify-center">
-                        {amount ? formatMoney(amount) : '$0'}
-                    </div>
+                    <div className="bg-green-50 p-4 rounded-2xl text-center font-black text-4xl text-green-600 shadow-inner h-16 flex items-center justify-center">{amount ? formatMoney(amount) : '$0'}</div>
                 </div>
-
-                <CalculatorKeypad 
-                    value={amount} 
-                    onChange={setAmount} 
-                    onConfirm={(val) => {
-                        if (Number(val) <= 0) return;
-                        onSave({
-                            amount: Number(val),
-                            note: "還款紀錄",
-                            category: "repayment",
-                            paidBy: payer,
-                            splitType: "shared",
-                            date: new Date().toISOString().split('T')[0]
-                        });
-                    }} 
-                    compact 
-                />
+                <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(val) => { if (Number(val) <= 0) return; onSave({ amount: Number(val), note: "還款紀錄", category: "repayment", paidBy: payer, splitType: "shared", date: new Date().toISOString().split('T')[0] }); }} compact />
             </div>
         </ModalLayout>
     );
@@ -455,7 +430,13 @@ const RepayModal = ({ debt, onClose, onSave }) => {
 
 const Statistics = ({ transactions }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const monthTransactions = useMemo(() => transactions.filter(t => { const d = new Date(t.date); return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear() && t.category !== 'repayment'; }), [transactions, currentDate]);
+  
+  // 保留各月份歷史紀錄的關鍵：根據 currentDate 過濾資料
+  const monthTransactions = useMemo(() => transactions.filter(t => { 
+    const d = new Date(t.date); 
+    return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear() && t.category !== 'repayment'; 
+  }), [transactions, currentDate]);
+
   const stats = useMemo(() => {
     const categoryMap = {}; let totalPaid = 0; let bfActualTotal = 0; let gfActualTotal = 0;
     monthTransactions.forEach(t => { 
@@ -472,12 +453,75 @@ const Statistics = ({ transactions }) => {
     const chartData = Object.entries(categoryMap).map(([id, value]) => ({ id, value, color: CATEGORIES.find(c => c.id === id)?.color || '#999', name: CATEGORIES.find(c => c.id === id)?.name || '未知' })).sort((a, b) => b.value - a.value);
     return { chartData, totalPaid, bfActualTotal, gfActualTotal };
   }, [monthTransactions]);
-  const changeMonth = (delta) => { const newDate = new Date(currentDate); newDate.setMonth(newDate.getMonth() + delta); setCurrentDate(newDate); };
+
+  const changeMonth = (delta) => { 
+    const newDate = new Date(currentDate); 
+    newDate.setMonth(newDate.getMonth() + delta); 
+    setCurrentDate(newDate); 
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm"><button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronLeft /></button><span className="font-bold text-lg">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</span><button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight /></button></div>
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100"><h3 className="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-widest"><Percent size={14}/> 分帳後實質支出</h3><div className="grid grid-cols-2 gap-4"><div className="bg-blue-50 p-4 rounded-2xl border border-blue-100"><div className="text-[10px] font-bold text-blue-400 mb-1">👦 男朋友</div><div className="text-xl font-black text-blue-600">{formatMoney(stats.bfActualTotal)}</div></div><div className="bg-pink-50 p-4 rounded-2xl border border-pink-100"><div className="text-[10px] font-bold text-pink-400 mb-1">👧 女朋友</div><div className="text-xl font-black text-pink-600">{formatMoney(stats.gfActualTotal)}</div></div></div></div>
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center"><SimpleDonutChart data={stats.chartData} total={stats.totalPaid} /><div className="flex flex-wrap gap-2 justify-center mt-4">{stats.chartData.map(d => (<div key={d.id} className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-50 border border-gray-100"><div className="w-2 h-2 rounded-full" style={{ background: d.color }}></div><span>{d.name}</span><span className="font-bold">{stats.totalPaid ? Math.round(d.value / stats.totalPaid * 100) : 0}%</span></div>))}</div></div>
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm">
+        <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ChevronLeft /></button>
+        <span className="font-bold text-lg">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</span>
+        <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ChevronRight /></button>
+      </div>
+
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+        <h3 className="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-widest"><Percent size={14}/> 分帳後實質支出</h3>
+        <div className="grid grid-cols-2 gap-4">
+            <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                <div className="text-[10px] font-bold text-blue-400 mb-1">👦 男朋友</div>
+                <div className="text-xl font-black text-blue-600">{formatMoney(stats.bfActualTotal)}</div>
+            </div>
+            <div className="bg-pink-50 p-4 rounded-2xl border border-pink-100">
+                <div className="text-[10px] font-bold text-pink-400 mb-1">👧 女朋友</div>
+                <div className="text-xl font-black text-pink-600">{formatMoney(stats.gfActualTotal)}</div>
+            </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center">
+        <SimpleDonutChart data={stats.chartData} total={stats.totalPaid} />
+        <div className="flex flex-wrap gap-2 justify-center mt-4">
+            {stats.chartData.map(d => (
+                <div key={d.id} className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-50 border border-gray-100">
+                    <div className="w-2 h-2 rounded-full" style={{ background: d.color }}></div>
+                    <span>{d.name}</span>
+                    <span className="font-bold">{stats.totalPaid ? Math.round(d.value / stats.totalPaid * 100) : 0}%</span>
+                </div>
+            ))}
+        </div>
+      </div>
+
+      {/* 歷史詳細清單 */}
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+            <History size={18} className="text-gray-400"/>
+            <h3 className="font-bold text-gray-700">{currentDate.getMonth() + 1}月 詳細消費清單</h3>
+        </div>
+        <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto hide-scrollbar">
+            {monthTransactions.length === 0 ? (
+                <div className="p-10 text-center text-gray-300 font-bold italic text-sm">該月份無消費紀錄</div>
+            ) : (
+                monthTransactions.map(t => (
+                    <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center gap-3">
+                            <div className="text-[10px] bg-gray-100 px-2 py-1 rounded font-mono text-gray-400">
+                                {t.date?.split('-')[2]}日
+                            </div>
+                            <div>
+                                <div className="text-sm font-bold text-gray-800">{t.note || '消費'}</div>
+                                <div className="text-[10px] text-gray-400">{CATEGORIES.find(c=>c.id===t.category)?.name}</div>
+                            </div>
+                        </div>
+                        <div className="text-sm font-bold text-gray-700">{formatMoney(t.amount)}</div>
+                    </div>
+                ))
+            )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -491,32 +535,14 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
           return (
             <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative overflow-hidden group">
               <div className="flex justify-between mb-4 relative z-10">
-                <div>
-                  <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
-                    {jar.name}
-                    <button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500 transition-colors"><Pencil size={14}/></button>
-                  </h3>
-                  <div className="text-[10px] text-gray-400 font-bold">目標 {formatMoney(tgt)}</div>
-                </div>
+                <div><h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">{jar.name}<button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500 transition-colors"><Pencil size={14}/></button></h3><div className="text-[10px] text-gray-400 font-bold">目標 {formatMoney(tgt)}</div></div>
                 <div className="bg-yellow-100 text-yellow-700 font-bold px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 shadow-sm"><Target size={10}/> {Math.round(progress)}%</div>
               </div>
               <div className="text-3xl font-black text-gray-800 mb-3 relative z-10">{formatMoney(cur)}</div>
-              <div className="w-full bg-gray-100 h-2.5 rounded-full mb-5 overflow-hidden relative z-10 shadow-inner">
-                <div className="bg-gradient-to-r from-yellow-300 to-orange-400 h-full transition-all duration-700" style={{ width: `${progress}%` }}></div>
-              </div>
+              <div className="w-full bg-gray-100 h-2.5 rounded-full mb-5 overflow-hidden relative z-10 shadow-inner"><div className="bg-gradient-to-r from-yellow-300 to-orange-400 h-full transition-all duration-700" style={{ width: `${progress}%` }}></div></div>
               <div className="flex justify-between items-end relative z-10">
-                  <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black border border-blue-100 shadow-sm">
-                          <span>👦</span> {formatMoney(jar.contributions?.bf || 0)}
-                      </div>
-                      <div className="flex items-center gap-1.5 px-2 py-1 bg-pink-50 text-pink-600 rounded-lg text-[10px] font-black border border-pink-100 shadow-sm">
-                          <span>👧</span> {formatMoney(jar.contributions?.gf || 0)}
-                      </div>
-                  </div>
-                  <div className="flex gap-2">
-                      <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-xl hover:bg-gray-200 transition-colors shadow-sm"><History size={16}/></button>
-                      <button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button>
-                  </div>
+                  <div className="flex flex-col gap-1.5"><div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black border border-blue-100 shadow-sm"><span>👦</span> {formatMoney(jar.contributions?.bf || 0)}</div><div className="flex items-center gap-1.5 px-2 py-1 bg-pink-50 text-pink-600 rounded-lg text-[10px] font-black border border-pink-100 shadow-sm"><span>👧</span> {formatMoney(jar.contributions?.gf || 0)}</div></div>
+                  <div className="flex gap-2"><button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-xl hover:bg-gray-200 transition-colors shadow-sm"><History size={16}/></button><button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button></div>
               </div>
               <PiggyBank className="absolute -bottom-6 -right-6 text-gray-50 opacity-40 z-0 transform -rotate-12 group-hover:scale-110 transition-transform duration-500" size={140} />
             </div>
@@ -539,7 +565,7 @@ const ModalLayout = ({ title, onClose, children }) => (
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
-    return (<ModalLayout title={initialData ? "編輯帳本" : "新帳本"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">帳本名稱</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日常開銷" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none border-none transition-all" autoFocus /><button onClick={() => onSave(name, initialData?.status)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200">儲存帳本</button>{initialData && <button onClick={() => { if(confirm('確定要永久刪除帳本嗎？')) onDelete(initialData.id); onClose(); }} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors">刪除此帳本</button>}</div></ModalLayout>);
+    return (<ModalLayout title={initialData ? "編輯帳本" : "新帳本"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">帳本名稱</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日常開銷" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none border-none transition-all" autoFocus /><button onClick={() => onSave(name, initialData?.status)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200">儲存帳本</button>{initialData && <button onClick={() => { if(confirm('確定要永久刪除帳本嗎？這將連同所有記帳紀錄一併刪除且無法復原！')) { onDelete(initialData.id); onClose(); } }} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors">永久刪除帳本 (危險動作)</button>}</div></ModalLayout>);
 };
 
 const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) => {
