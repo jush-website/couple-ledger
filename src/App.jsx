@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// 使用您的設定
 const firebaseConfig = {
   apiKey: "AIzaSyDPUjZ1dUV52O7JUeY-7befolezIWpI6vo",
   authDomain: "money-49190.firebaseapp.com",
@@ -29,10 +28,8 @@ const firebaseConfig = {
 };
 
 // --- API Helpers ---
-// 使用 Gemini 2.5 Flash Vision 進行收據辨識
 const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
-    // 使用您提供的 API Key
-    const apiKey = "AIzaSyAVr-jNp2WiiAauPoscBNuDkF-wlg2QofA"; 
+    const apiKey = ""; // API Key will be provided at runtime
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
     const prompt = `
@@ -73,16 +70,12 @@ const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
         
         if (!response.ok) {
             const errData = await response.json();
-            console.error("Gemini API Error:", errData);
             throw new Error(`API Error: ${errData.error?.message || response.statusText}`);
         }
 
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        
         if (!text) throw new Error("No response content from AI");
-        
-        // Clean up markdown code blocks if present
         const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
         return JSON.parse(cleanText);
     } catch (error) {
@@ -94,9 +87,7 @@ const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
 let app;
 try {
   app = initializeApp(firebaseConfig);
-} catch (e) {
-  // Ignore
-}
+} catch (e) {}
 const auth = getAuth(app);
 const db = getFirestore(app);
 
@@ -271,7 +262,6 @@ export default function CoupleLedgerApp() {
   const [jars, setJars] = useState([]);
   const [books, setBooks] = useState([]);
   
-  // Book filtering states
   const [activeBookId, setActiveBookId] = useState(null);
   const [viewArchived, setViewArchived] = useState(false);
 
@@ -301,12 +291,10 @@ export default function CoupleLedgerApp() {
             try { 
                 await signInWithCustomToken(auth, __initial_auth_token); 
             } catch(e) { 
-                console.warn("Custom token failed, attempting anonymous sign-in:", e);
-                // Fallback to anonymous sign in if custom token fails
-                try { await signInAnonymously(auth); } catch (e2) { console.error("Anonymous fallback failed:", e2); }
+                try { await signInAnonymously(auth); } catch (e2) {}
             }
         } else {
-            try { await signInAnonymously(auth); } catch (e) { console.error("Anonymous sign-in failed:", e); } 
+            try { await signInAnonymously(auth); } catch (e) {} 
         }
     };
     initAuth();
@@ -316,7 +304,6 @@ export default function CoupleLedgerApp() {
     return () => { clearTimeout(timer); unsubscribe(); };
   }, []);
 
-  // Initialize Data Listeners
   useEffect(() => {
     if (!user) return;
     try {
@@ -324,35 +311,24 @@ export default function CoupleLedgerApp() {
         const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
         const booksRef = collection(db, 'artifacts', appId, 'public', 'data', 'books');
         
-        // Listen to Books
         const unsubBooks = onSnapshot(booksRef, async (s) => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Sort by CreatedAt
             data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
             
-            // If no books exist, create default one
             if (data.length === 0 && !s.metadata.hasPendingWrites) {
                await addDoc(booksRef, { name: "預設帳本", status: 'active', createdAt: serverTimestamp() });
                return; 
             }
-            
             setBooks(data);
-            
-            // Set active book intelligently
             setActiveBookId(prev => {
-                // If current selection is valid, keep it
                 if (prev && data.find(b => b.id === prev)) return prev;
-                // Otherwise find first active book
                 const firstActive = data.find(b => (b.status || 'active') === 'active');
-                if (firstActive) return firstActive.id;
-                // Fallback to first book (even if archived)
-                return data[0]?.id || null;
+                return firstActive ? firstActive.id : (data[0]?.id || null);
             });
         });
 
         const unsubTrans = onSnapshot(transRef, (s) => {
           const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-          
           data.sort((a, b) => {
             const dateA = new Date(a.date).getTime();
             const dateB = new Date(b.date).getTime();
@@ -361,7 +337,6 @@ export default function CoupleLedgerApp() {
             const timeB = b.createdAt?.seconds || 0;
             return timeB - timeA;
           });
-
           setTransactions(data);
         });
 
@@ -370,18 +345,15 @@ export default function CoupleLedgerApp() {
     } catch (e) { console.error(e); }
   }, [user]);
 
-  // Derived filtered transactions based on Active Book
   const filteredTransactions = useMemo(() => {
       if (!activeBookId) return [];
       const defaultBookId = books[0]?.id;
       return transactions.filter(t => {
           if (t.bookId) return t.bookId === activeBookId;
-          // Legacy data handling
           return activeBookId === defaultBookId;
       });
   }, [transactions, activeBookId, books]);
 
-  // Derived filtered books based on view mode (Active vs Archived)
   const displayBooks = useMemo(() => {
       return books.filter(b => {
           const status = b.status || 'active';
@@ -391,12 +363,11 @@ export default function CoupleLedgerApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  // --- Transaction Actions ---
   const handleSaveTransaction = async (data) => {
     if (!user) return;
     try {
       const finalAmount = Number(safeCalculate(data.amount));
-      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId }; // Attach bookId
+      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId };
       if (editingTransaction) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
         showToast('紀錄已更新 ✨');
@@ -420,7 +391,6 @@ export default function CoupleLedgerApp() {
     });
   };
 
-  // --- Jar Actions ---
   const handleSaveJar = async (name, target) => {
     if (!user) return;
     try {
@@ -510,7 +480,6 @@ export default function CoupleLedgerApp() {
     });
   };
 
-  // --- Book Actions ---
   const handleSaveBook = async (name, status = 'active') => {
       if(!user || !name.trim()) return;
       try {
@@ -532,7 +501,6 @@ export default function CoupleLedgerApp() {
   };
 
   const handleDeleteBook = async (bookId) => {
-      // Don't check length if deleting archived
       if(books.filter(b => (b.status||'active') === 'active').length <= 1 && editingBook?.status !== 'archived') {
           showToast('至少需要保留一個使用中的帳本 ⚠️');
           return;
@@ -541,22 +509,16 @@ export default function CoupleLedgerApp() {
         isOpen: true, title: "刪除帳本", message: "確定要永久刪除這個帳本嗎？裡面的記帳紀錄也會一併刪除！(無法復原)", isDanger: true,
         onConfirm: async () => {
             try {
-                // Delete the book doc
                 await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', bookId));
-                
-                // Find and delete all related transactions
                 const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), where("bookId", "==", bookId));
                 const snap = await getDocs(q);
                 const batch = writeBatch(db);
                 snap.docs.forEach(d => batch.delete(d.ref));
                 await batch.commit();
-
-                // If deleting active book, switch to another
                 if(activeBookId === bookId) {
                     const remaining = books.filter(b => b.id !== bookId && (b.status||'active') === 'active');
                     if(remaining.length > 0) setActiveBookId(remaining[0].id);
                 }
-                
                 showToast('帳本已刪除 🗑️');
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
             } catch(e) { console.error(e); }
@@ -575,7 +537,6 @@ export default function CoupleLedgerApp() {
       setShowAddTransaction(true);
   };
 
-
   if (loading) return <AppLoading />;
   if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role', r); }} />;
 
@@ -589,7 +550,6 @@ export default function CoupleLedgerApp() {
             <h1 className="text-lg font-bold tracking-wide">我們的小金庫</h1>
           </div>
           <div className="flex items-center gap-3">
-              {/* Archive Toggle */}
               {activeTab === 'overview' && (
                   <button 
                     onClick={() => setViewArchived(!viewArchived)}
@@ -605,7 +565,6 @@ export default function CoupleLedgerApp() {
       </div>
 
       <div className="max-w-2xl mx-auto p-4">
-        {/* Book Selector UI (Only on Overview) */}
         {activeTab === 'overview' && (
              <div className="mb-4">
                  {viewArchived && <div className="text-xs text-gray-400 mb-2 font-bold flex items-center gap-1"><Archive size={12}/> 歷史封存區 (唯讀模式)</div>}
@@ -630,7 +589,6 @@ export default function CoupleLedgerApp() {
                              <Plus size={18} />
                          </button>
                      )}
-                     {displayBooks.length === 0 && <div className="text-gray-400 text-sm italic py-2">沒有{viewArchived ? '封存' : '使用中'}的帳本</div>}
                  </div>
              </div>
         )}
@@ -643,7 +601,7 @@ export default function CoupleLedgerApp() {
                 onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
                 onScan={() => setShowScanner(true)}
                 onEdit={(t) => { 
-                    if(viewArchived) return; // Read only
+                    if(viewArchived) return;
                     setEditingTransaction(t); 
                     setShowAddTransaction(true); 
                 }} 
@@ -654,14 +612,7 @@ export default function CoupleLedgerApp() {
             />
         )}
 
-        {activeTab === 'stats' && (
-            <div>
-                <div className="bg-white px-4 py-2 rounded-xl shadow-sm mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600">
-                    <Book size={14}/> 統計範圍: {books.find(b => b.id === activeBookId)?.name || '未知帳本'}
-                </div>
-                <Statistics transactions={filteredTransactions} />
-            </div>
-        )}
+        {activeTab === 'stats' && <Statistics transactions={filteredTransactions} />}
         {activeTab === 'savings' && <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j)} />}
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
@@ -695,15 +646,7 @@ export default function CoupleLedgerApp() {
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
       {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
-      
-      {showBookManager && (
-          <BookManagerModal 
-            onClose={() => setShowBookManager(false)} 
-            onSave={handleSaveBook} 
-            onDelete={handleDeleteBook}
-            initialData={editingBook}
-          />
-      )}
+      {showBookManager && <BookManagerModal onClose={() => setShowBookManager(false)} onSave={handleSaveBook} onDelete={handleDeleteBook} initialData={editingBook} />}
     </div>
   );
 }
@@ -727,6 +670,7 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
+// --- MODIFIED OVERVIEW COMPONENT ---
 const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnly }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
@@ -752,9 +696,24 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
     return bfLent;
   }, [transactions]);
 
+  // Updated grouping logic to calculate daily totals per role
   const grouped = useMemo(() => {
     const groups = {};
-    transactions.forEach(t => { if (!t.date) return; if (!groups[t.date]) groups[t.date] = []; groups[t.date].push(t); });
+    transactions.forEach(t => { 
+        if (!t.date) return; 
+        if (!groups[t.date]) {
+            groups[t.date] = { items: [], bfTotal: 0, gfTotal: 0 };
+        }
+        groups[t.date].items.push(t);
+        
+        // Calculate daily spending totals based on who paid
+        // Note: Repayment category is usually excluded from daily "spending" stats to avoid double counting
+        if (t.category !== 'repayment') {
+            const amt = Number(t.amount) || 0;
+            if (t.paidBy === 'bf') groups[t.date].bfTotal += amt;
+            else if (t.paidBy === 'gf') groups[t.date].gfTotal += amt;
+        }
+    });
     return Object.entries(groups).sort((a, b) => new Date(b[0]) - new Date(a[0]));
   }, [transactions]);
 
@@ -782,10 +741,24 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
                 </div>
             )}
         </div>
-        {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, items]) => (
+        {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, data]) => (
             <div key={date} className="space-y-2">
-              <div className="text-xs font-bold text-gray-400 ml-2 bg-gray-100 inline-block px-2 py-1 rounded-md">{date}</div>
-              {items.map(t => (
+              <div className="flex items-center justify-between px-2 mb-1">
+                <div className="text-xs font-bold text-gray-400 bg-gray-100 inline-block px-2 py-1 rounded-md">{date}</div>
+                <div className="flex gap-2">
+                    {data.bfTotal > 0 && (
+                        <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-500 text-[10px] font-bold rounded-lg border border-blue-100">
+                            <span>👦</span> {formatMoney(data.bfTotal)}
+                        </div>
+                    )}
+                    {data.gfTotal > 0 && (
+                        <div className="flex items-center gap-1 px-2 py-1 bg-pink-50 text-pink-500 text-[10px] font-bold rounded-lg border border-pink-100">
+                            <span>👧</span> {formatMoney(data.gfTotal)}
+                        </div>
+                    )}
+                </div>
+              </div>
+              {data.items.map(t => (
                 <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between transition-colors ${readOnly ? '' : 'active:bg-gray-50'}`}>
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
@@ -863,7 +836,6 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
           </div>
         );
       })}
-      {jars.length === 0 && <div className="text-center py-10 text-gray-400">還沒有存錢計畫，快來建立一個！</div>}
     </div>
   </div>
 );
@@ -891,56 +863,25 @@ const ModalLayout = ({ title, onClose, children }) => (
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
-    // If no status, it's a legacy active book
     const [isArchived, setIsArchived] = useState(initialData?.status === 'archived');
-    
     return (
         <ModalLayout title={initialData ? "編輯帳本" : "新增帳本"} onClose={onClose}>
             <div className="space-y-4 pt-2">
                 <div>
                     <label className="block text-xs font-bold text-gray-400 mb-1">帳本名稱</label>
-                    <input 
-                        type="text" 
-                        value={name} 
-                        onChange={e => setName(e.target.value)} 
-                        placeholder="例如: 日常開銷、日本旅遊" 
-                        className="w-full bg-gray-50 border-none rounded-xl p-3 text-base font-bold focus:ring-2 focus:ring-blue-100 outline-none" 
-                        autoFocus
-                    />
+                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日常開銷" className="w-full bg-gray-50 border-none rounded-xl p-3 text-base font-bold focus:ring-2 focus:ring-blue-100 outline-none" autoFocus />
                 </div>
-                
                 {initialData && (
                     <div className="bg-orange-50 p-3 rounded-xl border border-orange-100">
                         <div className="flex items-center justify-between">
                             <span className="text-sm font-bold text-orange-800 flex items-center gap-2"><Archive size={16}/> 封存此帳本?</span>
-                            <button 
-                                onClick={() => setIsArchived(!isArchived)} 
-                                className={`w-12 h-6 rounded-full transition-colors relative ${isArchived ? 'bg-orange-400' : 'bg-gray-300'}`}
-                            >
-                                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${isArchived ? 'left-7' : 'left-1'}`}></div>
-                            </button>
+                            <button onClick={() => setIsArchived(!isArchived)} className={`w-12 h-6 rounded-full transition-colors relative ${isArchived ? 'bg-orange-400' : 'bg-gray-300'}`}><div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${isArchived ? 'left-7' : 'left-1'}`}></div></button>
                         </div>
-                        <p className="text-xs text-orange-600 mt-2">
-                            {isArchived ? '此帳本將移至歷史區，主畫面將隱藏。' : '此帳本目前正在使用中。'}
-                        </p>
                     </div>
                 )}
-                
-                <button 
-                    onClick={() => onSave(name, isArchived ? 'archived' : 'active')}
-                    disabled={!name.trim()}
-                    className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform"
-                >
-                    儲存變更
-                </button>
-
+                <button onClick={() => onSave(name, isArchived ? 'archived' : 'active')} disabled={!name.trim()} className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform">儲存變更</button>
                 {initialData && (
-                    <button 
-                        onClick={() => onDelete(initialData.id)}
-                        className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100"
-                    >
-                        <Trash2 size={16} /> 永久刪除
-                    </button>
+                    <button onClick={() => onDelete(initialData.id)} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100"><Trash2 size={16} /> 永久刪除</button>
                 )}
             </div>
         </ModalLayout>
@@ -948,7 +889,7 @@ const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
 };
 
 const ReceiptScannerModal = ({ onClose, onConfirm }) => {
-    const [step, setStep] = useState('upload'); // upload, analyzing, review
+    const [step, setStep] = useState('upload');
     const [image, setImage] = useState(null);
     const [scannedData, setScannedData] = useState(null);
     const [selectedItems, setSelectedItems] = useState({});
@@ -960,17 +901,9 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
         const reader = new FileReader();
         reader.onloadend = () => {
             setImage(reader.result);
-            // Extract mime type from result: "data:image/png;base64,..."
             const match = reader.result.match(/^data:(.*?);base64,(.*)$/);
-            if (match) {
-                 const mimeType = match[1];
-                 const base64Data = match[2];
-                 processImage(base64Data, mimeType);
-            } else {
-                 // Fallback
-                 const base64Data = reader.result.split(',')[1];
-                 processImage(base64Data, "image/jpeg");
-            }
+            if (match) processImage(match[2], match[1]);
+            else processImage(reader.result.split(',')[1], "image/jpeg");
         };
         reader.readAsDataURL(file);
     };
@@ -981,117 +914,59 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
         try {
             const result = await analyzeReceiptImage(base64, mimeType);
             setScannedData(result);
-            // Default select all
             const initialSel = {};
-            if (result.items && result.items.length > 0) {
-                 result.items.forEach((_, i) => initialSel[i] = true);
-            }
+            if (result.items) result.items.forEach((_, i) => initialSel[i] = true);
             setSelectedItems(initialSel);
             setStep('review');
         } catch (e) {
-            console.error(e);
-            setErrorMsg("辨識失敗，可能是圖片格式不支援或 AI 無回應。");
-            // Allow retry
+            setErrorMsg("辨識失敗，請重試。");
         }
-    };
-
-    const toggleItem = (idx) => {
-        setSelectedItems(prev => ({ ...prev, [idx]: !prev[idx] }));
     };
 
     const handleConfirm = () => {
         const itemsToImport = scannedData.items.filter((_, i) => selectedItems[i]);
         const total = itemsToImport.reduce((acc, curr) => acc + curr.price, 0);
-        // Concatenate names for the note
-        const note = itemsToImport.map(i => i.name).join(', ').substring(0, 50) + (itemsToImport.length > 2 ? '...' : '');
-        // Determine category (simple logic: mostly food -> food)
+        const note = itemsToImport.map(i => i.name).join(', ').substring(0, 50);
         const categories = itemsToImport.map(i => i.category);
         const modeCategory = categories.sort((a,b) => categories.filter(v=>v===a).length - categories.filter(v=>v===b).length).pop();
-        
-        onConfirm({
-            amount: total,
-            note: note || "收據匯入",
-            category: modeCategory || 'other',
-            date: scannedData.date || new Date().toISOString().split('T')[0]
-        });
+        onConfirm({ amount: total, note: note || "收據匯入", category: modeCategory || 'other', date: scannedData.date || new Date().toISOString().split('T')[0] });
     };
 
     return (
         <ModalLayout title="AI 智慧收據辨識" onClose={onClose}>
-            {step === 'upload' && !errorMsg && (
+            {step === 'upload' && (
                 <div className="flex flex-col items-center justify-center h-64 gap-4">
-                    <label className="w-full h-full flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 hover:bg-gray-100 cursor-pointer transition-colors">
-                        <div className="bg-purple-100 p-4 rounded-full mb-3 text-purple-600">
-                            <Camera size={32} />
-                        </div>
+                    <label className="w-full h-full flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50 hover:bg-gray-100 cursor-pointer">
+                        <div className="bg-purple-100 p-4 rounded-full mb-3 text-purple-600"><Camera size={32} /></div>
                         <span className="font-bold text-gray-600">拍照或上傳收據</span>
-                        <span className="text-xs text-gray-400 mt-2">支援自動翻譯與分類</span>
                         <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
                     </label>
                 </div>
             )}
-            
-            {step === 'analyzing' && !errorMsg && (
+            {step === 'analyzing' && (
                 <div className="flex flex-col items-center justify-center h-64 gap-4">
                     <Loader2 size={48} className="animate-spin text-purple-500" />
-                    <div className="text-center">
-                        <h3 className="font-bold text-gray-800">正在分析收據...</h3>
-                        <p className="text-xs text-gray-400 mt-1">AI 正在辨識品項並翻譯成中文</p>
-                    </div>
+                    <h3 className="font-bold text-gray-800">正在分析收據...</h3>
                 </div>
             )}
-
-            {errorMsg && (
-                 <div className="flex flex-col items-center justify-center h-64 gap-4">
-                    <div className="bg-red-100 p-4 rounded-full mb-3 text-red-500">
-                        <X size={32} />
-                    </div>
-                    <h3 className="font-bold text-gray-800">糟糕，出錯了</h3>
-                    <p className="text-xs text-red-400 mt-1 text-center px-4">{errorMsg}</p>
-                    <button onClick={() => { setStep('upload'); setErrorMsg(null); }} className="px-6 py-2 bg-gray-900 text-white rounded-xl text-sm font-bold mt-2">
-                        重試
-                    </button>
-                </div>
-            )}
-
-            {step === 'review' && scannedData && !errorMsg && (
+            {step === 'review' && scannedData && (
                 <div className="space-y-4">
                     <div className="flex justify-between items-center text-sm font-bold text-gray-500 bg-gray-100 p-2 rounded-lg">
                         <span>日期: {scannedData.date}</span>
                         <span>總計: {formatMoney(scannedData.total)}</span>
                     </div>
-                    
                     <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                        <div className="text-xs text-gray-400 px-1">請勾選要匯入的項目：</div>
                         {scannedData.items.map((item, idx) => (
-                            <div key={idx} onClick={() => toggleItem(idx)} className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${selectedItems[idx] ? 'border-purple-500 bg-purple-50' : 'border-gray-100 bg-white opacity-60'}`}>
+                            <div key={idx} onClick={() => setSelectedItems(prev => ({...prev, [idx]: !prev[idx]}))} className={`flex items-center justify-between p-3 rounded-xl border ${selectedItems[idx] ? 'border-purple-500 bg-purple-50' : 'border-gray-100 opacity-60'}`}>
                                 <div className="flex items-center gap-3">
-                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedItems[idx] ? 'bg-purple-500 border-purple-500' : 'border-gray-300'}`}>
-                                        {selectedItems[idx] && <Check size={12} className="text-white" />}
-                                    </div>
-                                    <div>
-                                        <div className="font-bold text-sm text-gray-800">{item.name}</div>
-                                        <div className="text-[10px] text-gray-500 flex gap-1 items-center">
-                                            <span className="bg-gray-200 px-1 rounded">{CATEGORIES.find(c=>c.id===item.category)?.name || '其他'}</span>
-                                        </div>
-                                    </div>
+                                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedItems[idx] ? 'bg-purple-500 border-purple-500' : 'border-gray-300'}`}>{selectedItems[idx] && <Check size={12} className="text-white" />}</div>
+                                    <div className="font-bold text-sm">{item.name}</div>
                                 </div>
                                 <div className="font-bold text-gray-700">{formatMoney(item.price)}</div>
                             </div>
                         ))}
                     </div>
-
-                    <div className="border-t border-gray-100 pt-3">
-                        <div className="flex justify-between items-center mb-3">
-                            <span className="text-sm font-bold text-gray-500">選取金額合計</span>
-                            <span className="text-xl font-black text-purple-600">
-                                {formatMoney(scannedData.items.reduce((acc, item, i) => selectedItems[i] ? acc + item.price : acc, 0))}
-                            </span>
-                        </div>
-                        <button onClick={handleConfirm} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-transform">
-                            匯入並前往分帳
-                        </button>
-                    </div>
+                    <button onClick={handleConfirm} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg">匯入並前往分帳</button>
                 </div>
             )}
         </ModalLayout>
@@ -1105,78 +980,42 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   const [category, setCategory] = useState(initialData?.category || 'food');
   const [paidBy, setPaidBy] = useState(initialData?.paidBy || currentUserRole);
   const [splitType, setSplitType] = useState(initialData?.splitType || 'shared');
-   
   const [customBf, setCustomBf] = useState(initialData?.splitDetails?.bf || '');
   const [customGf, setCustomGf] = useState(initialData?.splitDetails?.gf || '');
-   
-  // Slider state
-  const [ratioValue, setRatioValue] = useState(
-      initialData?.splitType === 'ratio' && initialData.amount 
-      ? Math.round((initialData.splitDetails.bf / initialData.amount) * 100) 
-      : 50
-  );
+  const [ratioValue, setRatioValue] = useState(initialData?.splitType === 'ratio' ? Math.round((initialData.splitDetails.bf / initialData.amount) * 100) : 50);
 
-  const scrollRef = useRef(null);
-  const scroll = (offset) => { if(scrollRef.current) scrollRef.current.scrollBy({ left: offset, behavior: 'smooth' }); };
-
-  // Effect to update customBf/Gf when ratio or amount changes in ratio mode
   useEffect(() => {
     if (splitType === 'ratio') {
         const total = Number(safeCalculate(amount)) || 0;
         const bf = Math.round(total * (ratioValue / 100));
-        const gf = total - bf;
         setCustomBf(bf.toString());
-        setCustomGf(gf.toString());
+        setCustomGf((total - bf).toString());
     }
   }, [amount, ratioValue, splitType]);
 
-  const handleCustomChange = (who, val) => {
-    const numVal = Number(val);
-    const total = Number(safeCalculate(amount)) || 0;
-    if (who === 'bf') { setCustomBf(val); setCustomGf((total - numVal).toString()); } 
-    else { setCustomGf(val); setCustomBf((total - numVal).toString()); }
-  };
-
   const handleSubmit = (finalAmount) => {
-    if (!finalAmount || finalAmount === '0' || isNaN(Number(finalAmount))) return;
-    const payload = { amount: finalAmount, note, date, category, paidBy, splitType, updatedAt: serverTimestamp() };
-    
-    if (splitType === 'custom' || splitType === 'ratio') { 
-        payload.splitDetails = { bf: Number(customBf) || 0, gf: Number(customGf) || 0 }; 
-    }
-    
+    if (!finalAmount || isNaN(Number(finalAmount))) return;
+    const payload = { amount: finalAmount, note, date, category, paidBy, splitType };
+    if (['custom', 'ratio'].includes(splitType)) payload.splitDetails = { bf: Number(customBf) || 0, gf: Number(customGf) || 0 };
     onSave(payload);
   };
 
   return (
     <ModalLayout title={initialData ? "編輯紀錄" : "記一筆"} onClose={onClose}>
       <div className="space-y-3 pb-2">
-        <div className="bg-gray-50 p-2 rounded-xl text-center border-2 border-transparent focus-within:border-blue-200 transition-colors">
-          <div className="text-3xl font-black text-gray-800 tracking-wider h-9 flex items-center justify-center overflow-hidden">{amount ? amount : <span className="text-gray-300">0</span>}</div>
+        <div className="bg-gray-50 p-2 rounded-xl text-center">
+          <div className="text-3xl font-black text-gray-800 h-9 flex items-center justify-center">{amount ? amount : <span className="text-gray-300">0</span>}</div>
         </div>
-        
         <div className="flex gap-2">
-           <input 
-             type="date" 
-             value={date} 
-             onChange={e => setDate(e.target.value)} 
-             className="bg-gray-50 border-none rounded-xl px-2 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none w-[130px] flex-shrink-0 text-center" 
-             style={{ minHeight: '44px' }}
-           />
-           <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="備註 (例如: 晚餐)" className="bg-gray-50 border-none rounded-xl p-2 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none flex-1 min-w-0" />
+           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 rounded-xl px-2 py-3 text-sm font-bold w-[130px]" />
+           <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="備註" className="bg-gray-50 rounded-xl p-2 text-sm font-bold flex-1" />
         </div>
-        
-        <div className="relative group">
-            <button onClick={() => scroll(-100)} className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 p-1 rounded-full shadow-md text-gray-600 hidden group-hover:block hover:bg-white"><ChevronLeft size={16}/></button>
-            <div ref={scrollRef} className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar scroll-smooth">
-                {CATEGORIES.map(c => (
-                <button key={c.id} onClick={() => setCategory(c.id)} className={`flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all border-2 whitespace-nowrap ${category === c.id ? 'border-gray-800 bg-gray-800 text-white' : 'border-gray-100 bg-white text-gray-500'}`}>{c.name}</button>
-                ))}
-            </div>
-            <button onClick={() => scroll(100)} className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/80 p-1 rounded-full shadow-md text-gray-600 hidden group-hover:block hover:bg-white"><ChevronRight size={16}/></button>
+        <div className="flex overflow-x-auto pb-2 gap-2 hide-scrollbar">
+            {CATEGORIES.map(c => (
+                <button key={c.id} onClick={() => setCategory(c.id)} className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap ${category === c.id ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 border'}`}>{c.name}</button>
+            ))}
         </div>
-
-        <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="grid grid-cols-2 gap-2">
              <div className="bg-gray-50 p-2 rounded-xl">
                <div className="text-[10px] text-gray-400 text-center mb-1">誰付的錢?</div>
                <div className="flex bg-white rounded-lg p-1 shadow-sm">
@@ -1186,52 +1025,15 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
              </div>
              <div className="bg-gray-50 p-2 rounded-xl">
                <div className="text-[10px] text-gray-400 text-center mb-1">分帳方式</div>
-               <select value={splitType} onChange={e => { 
-                   setSplitType(e.target.value); 
-                   if(e.target.value === 'custom') { 
-                       const half = (Number(safeCalculate(amount)) || 0) / 2; 
-                       setCustomBf(half.toString()); 
-                       setCustomGf(half.toString()); 
-                   }
-                   if(e.target.value === 'ratio') {
-                       setRatioValue(50);
-                   }
-               }} className="w-full bg-white text-xs font-bold py-1.5 rounded-md border-none outline-none text-center">
-                   <option value="shared">平分 (50/50)</option>
-                   <option value="ratio">比例分帳 (滑動)</option>
+               <select value={splitType} onChange={e => setSplitType(e.target.value)} className="w-full bg-white text-xs font-bold py-1.5 rounded-md outline-none text-center">
+                   <option value="shared">平分</option>
+                   <option value="ratio">比例分帳</option>
                    <option value="custom">自訂金額</option>
-                   <option value="bf_personal">男友100%</option>
-                   <option value="gf_personal">女友100%</option>
+                   <option value="bf_personal">男友全額</option>
+                   <option value="gf_personal">女友全額</option>
                </select>
              </div>
         </div>
-
-        {/* Ratio Slider UI */}
-        {splitType === 'ratio' && (
-            <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 animate-[fadeIn_0.2s]">
-                <div className="flex justify-between text-[10px] font-bold text-gray-500 mb-1">
-                    <span className="text-blue-500">男友 {ratioValue}%</span>
-                    <span className="text-purple-400">比例分配</span>
-                    <span className="text-pink-500">女友 {100 - ratioValue}%</span>
-                </div>
-                <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
-                    value={ratioValue} 
-                    onChange={(e) => setRatioValue(Number(e.target.value))}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500 mb-2"
-                />
-                <div className="flex justify-between text-xs font-bold">
-                    <span className="text-blue-600">{formatMoney(customBf)}</span>
-                    <span className="text-pink-600">{formatMoney(customGf)}</span>
-                </div>
-            </div>
-        )}
-
-        {/* Custom Input UI */}
-        {splitType === 'custom' && (<div className="bg-blue-50 p-3 rounded-xl border border-blue-100 animate-[fadeIn_0.2s]"><div className="text-[10px] text-blue-400 font-bold mb-2 text-center">輸入金額 (自動計算剩餘)</div><div className="flex gap-3 items-center"><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">男友應付</label><input type="number" value={customBf} onChange={(e) => handleCustomChange('bf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-blue-200" placeholder="0" /></div><div className="text-gray-400 font-bold">+</div><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">女友應付</label><input type="number" value={customGf} onChange={(e) => handleCustomChange('gf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-pink-200" placeholder="0" /></div></div></div>)}
-        
         <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={handleSubmit} compact={true} />
       </div>
     </ModalLayout>
@@ -1246,9 +1048,9 @@ const AddJarModal = ({ onClose, onSave, initialData }) => {
       <div className="space-y-4">
         <div className="bg-gray-50 p-3 rounded-2xl">
           <label className="block mb-1 text-xs font-bold text-gray-400">目標金額</label>
-          <div className="text-2xl font-black text-gray-800 tracking-wider h-8 flex items-center overflow-hidden">{target ? target : <span className="text-gray-300">0</span>}</div>
+          <div className="text-2xl font-black text-gray-800 h-8 flex items-center">{target ? target : <span className="text-gray-300">0</span>}</div>
         </div>
-        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="名稱 (例如: 旅遊基金)" className="w-full bg-gray-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none" />
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="名稱" className="w-full bg-gray-50 rounded-xl p-3 text-sm font-bold outline-none" />
         <CalculatorKeypad value={target} onChange={setTarget} onConfirm={(val) => { if (name && val) onSave(name, val); }} compact={true} />
       </div>
     </ModalLayout>
@@ -1262,17 +1064,13 @@ const DepositModal = ({ jar, onClose, onConfirm, role }) => {
   return (
     <ModalLayout title={`存入: ${jar.name}`} onClose={onClose}>
       <div className="space-y-4">
-        <div className="text-center"><div className="text-gray-400 text-xs mb-1">目前進度</div><div className="font-bold text-xl text-gray-800">{formatMoney(jar.currentAmount)} <span className="text-gray-300 text-sm">/ {formatMoney(jar.targetAmount)}</span></div></div>
-        
-        <div className="bg-gray-50 p-2 rounded-xl">
-           <div className="text-[10px] text-gray-400 text-center mb-1">是誰存的?</div>
-           <div className="flex bg-white rounded-lg p-1 shadow-sm">
-             <button onClick={() => setDepositor('bf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button>
-             <button onClick={() => setDepositor('gf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button>
-           </div>
-         </div>
-
-        <div className="bg-gray-50 p-3 rounded-2xl text-center"><div className="text-xs text-gray-400 mb-1">存入金額</div><div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center text-green-500 overflow-hidden">{amount ? `+${amount}` : <span className="text-gray-300">0</span>}</div></div>
+        <div className="flex bg-white rounded-lg p-1 border">
+          <button onClick={() => setDepositor('bf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button>
+          <button onClick={() => setDepositor('gf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button>
+        </div>
+        <div className="bg-gray-50 p-3 rounded-2xl text-center">
+            <div className="text-3xl font-black text-green-500">{amount ? `+${amount}` : "0"}</div>
+        </div>
         <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(val) => { if(Number(val) > 0) onConfirm(jar.id, val, depositor); }} compact={true} />
       </div>
     </ModalLayout>
@@ -1282,46 +1080,28 @@ const DepositModal = ({ jar, onClose, onConfirm, role }) => {
 const JarHistoryModal = ({ jar, onClose, onUpdateItem, onDeleteItem }) => {
   const [editingItem, setEditingItem] = useState(null);
   const [editAmount, setEditAmount] = useState('');
-
   const history = [...(jar.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-
   return (
-    <ModalLayout title={`${jar.name} - 存錢紀錄`} onClose={onClose}>
+    <ModalLayout title={`${jar.name} - 紀錄`} onClose={onClose}>
         {editingItem ? (
-            <div className="space-y-4 animate-[fadeIn_0.2s]">
-                <button onClick={() => setEditingItem(null)} className="flex items-center gap-1 text-gray-500 text-xs font-bold mb-2"><ArrowLeft size={14}/> 返回列表</button>
-                <div className="bg-gray-50 p-3 rounded-2xl text-center">
-                    <div className="text-xs text-gray-400 mb-1">修改金額</div>
-                    <div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">{editAmount}</div>
-                </div>
-                <CalculatorKeypad 
-                    value={editAmount} 
-                    onChange={setEditAmount} 
-                    onConfirm={(val) => {
-                        if(Number(val) >= 0) {
-                            onUpdateItem(jar, editingItem, val);
-                            setEditingItem(null);
-                        }
-                    }} 
-                    compact={true} 
-                />
+            <div className="space-y-4">
+                <button onClick={() => setEditingItem(null)} className="flex items-center gap-1 text-gray-500 text-xs font-bold mb-2"><ArrowLeft size={14}/> 返回</button>
+                <CalculatorKeypad value={editAmount} onChange={setEditAmount} onConfirm={(val) => { onUpdateItem(jar, editingItem, val); setEditingItem(null); }} compact={true} />
             </div>
         ) : (
             <div className="space-y-2">
-                {history.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">尚無詳細紀錄</div> : history.map((item, idx) => (
+                {history.map((item, idx) => (
                     <div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl">
                         <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${item.role === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>
-                                {item.role === 'bf' ? '👦' : '👧'}
-                            </div>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${item.role === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>{item.role === 'bf' ? '👦' : '👧'}</div>
                             <div>
                                 <div className="text-xs text-gray-400">{new Date(item.date).toLocaleDateString()}</div>
                                 <div className="font-bold text-gray-800">{formatMoney(item.amount)}</div>
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={() => { setEditingItem(item); setEditAmount(item.amount.toString()); }} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-blue-500"><Pencil size={16}/></button>
-                            <button onClick={() => onDeleteItem(jar, item)} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                            <button onClick={() => { setEditingItem(item); setEditAmount(item.amount.toString()); }} className="p-2 text-gray-400"><Pencil size={16}/></button>
+                            <button onClick={() => onDeleteItem(jar, item)} className="p-2 text-gray-400"><Trash2 size={16}/></button>
                         </div>
                     </div>
                 ))}
