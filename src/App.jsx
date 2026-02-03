@@ -13,7 +13,8 @@ import {
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
   ArrowLeft, Check, History, Percent, Book, MoreHorizontal,
-  Camera, Archive, Reply, Loader2, Image as ImageIcon
+  Camera, Archive, Reply, Loader2, Image as ImageIcon,
+  ArrowRightLeft
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -42,6 +43,7 @@ const CATEGORIES = [
   { id: 'shopping', name: '購物', color: '#0088FE' },
   { id: 'house', name: '居家', color: '#8884d8' },
   { id: 'travel', name: '旅遊', color: '#FF6B6B' },
+  { id: 'repayment', name: '還款', color: '#10B981' }, // 新增還款類別
   { id: 'other', name: '其他', color: '#999' },
 ];
 
@@ -259,7 +261,18 @@ export default function CoupleLedgerApp() {
                 {!viewArchived && <button onClick={() => { setEditingBook(null); setShowBookManager(true); }} className="px-3 bg-white text-gray-400 rounded-xl shadow-sm hover:bg-gray-100"><Plus size={18} /></button>}
             </div>
         )}
-        {activeTab === 'overview' && <Overview transactions={filteredTransactions} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onEdit={(t) => { if(!viewArchived) { setEditingTransaction(t); setShowAddTransaction(true); } }} onDelete={(id) => !viewArchived && deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id))} />}
+        {activeTab === 'overview' && (
+          <Overview 
+            transactions={filteredTransactions} 
+            role={role} 
+            readOnly={viewArchived} 
+            onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
+            onScan={() => setShowScanner(true)} 
+            onEdit={(t) => { if(!viewArchived) { setEditingTransaction(t); setShowAddTransaction(true); } }} 
+            onDelete={(id) => !viewArchived && deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id))} 
+            onRepay={handleSaveTransaction}
+          />
+        )}
         {activeTab === 'stats' && <Statistics transactions={filteredTransactions} />}
         {activeTab === 'savings' && <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={(id) => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', id))} onHistory={(j) => setShowJarHistory(j)} />}
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
@@ -284,13 +297,15 @@ const RoleSelection = ({ onSelect }) => (
   <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 text-center"><div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm"><h1 className="text-2xl font-bold mb-6">歡迎使用小金庫</h1><div className="space-y-4"><button onClick={() => onSelect('bf')} className="w-full py-4 bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-200">我是男朋友 👦</button><button onClick={() => onSelect('gf')} className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold shadow-lg shadow-pink-200">我是女朋友 👧</button></div></div></div>
 );
 
-const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnly }) => {
+const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnly, onRepay }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
     transactions.forEach(t => {
       const amt = Number(t.amount) || 0;
-      if (t.category === 'repayment') t.paidBy === 'bf' ? bfLent -= amt : bfLent += amt;
-      else {
+      if (t.category === 'repayment') {
+          // 還款邏輯：若男友還錢，其餘額增加；若女友還錢，男友餘額減少
+          t.paidBy === 'bf' ? bfLent += amt : bfLent -= amt;
+      } else {
         let gfS = 0, bfS = 0;
         if (['custom', 'ratio'].includes(t.splitType) && t.splitDetails) { gfS = t.splitDetails.gf; bfS = t.splitDetails.bf; }
         else if (t.splitType === 'shared') { gfS = amt/2; bfS = amt/2; }
@@ -306,32 +321,97 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
     const groups = {};
     transactions.forEach(t => { 
         if (!t.date) return; 
-        if (!groups[t.date]) groups[t.date] = { items: [], bfTotal: 0, gfTotal: 0 };
+        if (!groups[t.date]) groups[t.date] = { items: [], bfShareTotal: 0, gfShareTotal: 0 };
         groups[t.date].items.push(t);
+        
+        // 實質支出邏輯：計算每個人在該筆消費中的「應付金額」
         if (t.category !== 'repayment') {
             const amt = Number(t.amount) || 0;
-            t.paidBy === 'bf' ? groups[t.date].bfTotal += amt : groups[t.date].gfTotal += amt;
+            let bfS = 0, gfS = 0;
+            if (t.splitType === 'shared') { bfS = amt/2; gfS = amt/2; }
+            else if (t.splitType === 'bf_personal') bfS = amt;
+            else if (t.splitType === 'gf_personal') gfS = amt;
+            else if (['custom', 'ratio'].includes(t.splitType) && t.splitDetails) {
+                bfS = Number(t.splitDetails.bf) || 0;
+                gfS = Number(t.splitDetails.gf) || 0;
+            }
+            groups[t.date].bfShareTotal += bfS;
+            groups[t.date].gfShareTotal += gfS;
         }
     });
     return Object.entries(groups).sort((a, b) => new Date(b[0]) - new Date(a[0]));
   }, [transactions]);
 
+  const handleRepayClick = () => {
+      if (Math.abs(debt) < 1) return;
+      const amountToRepay = Math.abs(debt);
+      const payer = debt > 0 ? 'gf' : 'bf'; // 男友餘額正數代表女友欠錢，女友付錢
+      const receiver = payer === 'bf' ? '女朋友' : '男朋友';
+      
+      if (window.confirm(`確定要產生一筆 ${receiver} 收到的 ${formatMoney(amountToRepay)} 還款紀錄嗎？`)) {
+          onRepay({
+              amount: amountToRepay,
+              note: "還款結清",
+              category: "repayment",
+              paidBy: payer,
+              splitType: "shared", // 還款類別不影響分帳，設定預設即可
+              date: new Date().toISOString().split('T')[0]
+          });
+      }
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-3xl shadow-sm border text-center relative overflow-hidden">
         <div className={`absolute top-0 left-0 w-full h-1 ${Math.abs(debt) < 1 ? 'bg-green-400' : (debt > 0 ? 'bg-blue-400' : 'bg-pink-400')}`}></div>
-        <div className="text-gray-400 text-xs font-bold mb-2 uppercase tracking-widest">本帳本結算</div>
-        {Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500">互不相欠 ✨</div> : <div className="text-xl font-bold"><span className={debt > 0 ? 'text-blue-500' : 'text-pink-500'}>{debt > 0 ? '男朋友' : '女朋友'}</span> 先墊了 {formatMoney(Math.abs(debt))}</div>}
+        <div className="text-gray-400 text-xs font-bold mb-2 uppercase tracking-widest">目前結算</div>
+        {Math.abs(debt) < 1 ? (
+            <div className="text-2xl font-black text-green-500">互不相欠 ✨</div>
+        ) : (
+            <div className="space-y-4">
+                <div className="text-xl font-bold">
+                    <span className={debt > 0 ? 'text-blue-500' : 'text-pink-500'}>{debt > 0 ? '男朋友' : '女朋友'}</span> 先墊了 {formatMoney(Math.abs(debt))}
+                </div>
+                {!readOnly && (
+                    <button 
+                        onClick={handleRepayClick}
+                        className="bg-green-500 text-white px-6 py-2 rounded-xl text-sm font-bold flex items-center justify-center gap-2 mx-auto shadow-md hover:bg-green-600 active:scale-95 transition-all"
+                    >
+                        <ArrowRightLeft size={16}/> 結清還款
+                    </button>
+                )}
+            </div>
+        )}
       </div>
       <div className="space-y-4">
         <div className="flex justify-between items-center">{!readOnly && <div className="flex gap-2 w-full"><button onClick={onScan} className="flex-1 bg-purple-100 text-purple-600 py-3 rounded-xl flex items-center justify-center gap-2 font-bold shadow-sm"><Camera size={18}/> AI 辨識</button><button onClick={onAdd} className="flex-1 bg-gray-900 text-white py-3 rounded-xl flex items-center justify-center gap-2 font-bold shadow-lg"><Plus size={18}/> 記一筆</button></div>}</div>
         {grouped.map(([date, data]) => (
             <div key={date} className="space-y-2">
-              <div className="flex justify-between items-center px-1"><div className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">{date}</div><div className="flex gap-2">{data.bfTotal > 0 && <span className="text-[10px] bg-blue-50 text-blue-500 px-2 py-0.5 rounded border border-blue-100 font-bold">👦 {formatMoney(data.bfTotal)}</span>}{data.gfTotal > 0 && <span className="text-[10px] bg-pink-50 text-pink-500 px-2 py-0.5 rounded border border-pink-100 font-bold">👧 {formatMoney(data.gfTotal)}</span>}</div></div>
+              <div className="flex justify-between items-center px-1">
+                  <div className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">{date}</div>
+                  <div className="flex gap-2">
+                      {data.bfShareTotal > 0 && <span className="text-[10px] bg-blue-50 text-blue-500 px-2 py-0.5 rounded border border-blue-100 font-bold">👦 負擔 {formatMoney(data.bfShareTotal)}</span>}
+                      {data.gfShareTotal > 0 && <span className="text-[10px] bg-pink-50 text-pink-500 px-2 py-0.5 rounded border border-pink-100 font-bold">👧 負擔 {formatMoney(data.gfShareTotal)}</span>}
+                  </div>
+              </div>
               {data.items.map(t => (
-                <div key={t.id} onClick={() => onEdit(t)} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-sm" style={{ background: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'food' ? '🍔' : '🏷️'}</div><div><div className="font-bold text-gray-800">{t.note || CATEGORIES.find(c=>c.id===t.category)?.name}</div><div className="text-[10px] text-gray-400">{t.paidBy === 'bf' ? '男友付' : '女友付'} • {t.splitType === 'shared' ? '平分' : '個人/比例'}</div></div></div>
-                  <div className="font-bold text-lg text-gray-700">{formatMoney(t.amount)}</div>
+                <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between hover:bg-gray-50 transition-colors ${t.category === 'repayment' ? 'border-l-4 border-l-green-500' : ''}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-white shadow-sm" style={{ background: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>
+                        {t.category === 'repayment' ? <ArrowRightLeft size={18}/> : (t.category === 'food' ? '🍔' : '🏷️')}
+                    </div>
+                    <div>
+                        <div className="font-bold text-gray-800">{t.note || CATEGORIES.find(c=>c.id===t.category)?.name}</div>
+                        <div className="text-[10px] text-gray-400">
+                            {t.category === 'repayment' ? (
+                                <span className="text-green-600 font-bold">{t.paidBy === 'bf' ? '男友還給女友' : '女友還給男友'}</span>
+                            ) : (
+                                <span>{t.paidBy === 'bf' ? '男友付' : '女友付'} • {t.splitType === 'shared' ? '平分' : '個人/比例'}</span>
+                            )}
+                        </div>
+                    </div>
+                  </div>
+                  <div className={`font-bold text-lg ${t.category === 'repayment' ? 'text-green-600' : 'text-gray-700'}`}>{formatMoney(t.amount)}</div>
                 </div>
               ))}
             </div>
@@ -370,7 +450,6 @@ const Statistics = ({ transactions }) => {
   );
 };
 
-// --- MODIFIED SAVINGS COMPONENT ---
 const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) => (
   <div className="space-y-6">
     <div className="flex justify-between items-center px-2"><h2 className="font-bold text-xl text-gray-800">存錢目標</h2><button onClick={onAdd} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1 shadow-lg active:scale-95 transition-transform"><Plus size={18}/> 新目標</button></div>
@@ -389,13 +468,10 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
                 </div>
                 <div className="bg-yellow-100 text-yellow-700 font-bold px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1 shadow-sm"><Target size={10}/> {Math.round(progress)}%</div>
               </div>
-              
               <div className="text-3xl font-black text-gray-800 mb-3 relative z-10">{formatMoney(cur)}</div>
-              
               <div className="w-full bg-gray-100 h-2.5 rounded-full mb-5 overflow-hidden relative z-10 shadow-inner">
                 <div className="bg-gradient-to-r from-yellow-300 to-orange-400 h-full transition-all duration-700" style={{ width: `${progress}%` }}></div>
               </div>
-              
               <div className="flex justify-between items-end relative z-10">
                   <div className="flex flex-col gap-1.5">
                       <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-[10px] font-black border border-blue-100 shadow-sm">
@@ -414,7 +490,6 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
             </div>
           );
       })}
-      {jars.length === 0 && <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-gray-100 text-gray-300 font-bold">還沒有存錢目標，快來建立一個吧！</div>}
     </div>
   </div>
 );
@@ -432,7 +507,7 @@ const ModalLayout = ({ title, onClose, children }) => (
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
-    return (<ModalLayout title={initialData ? "編輯帳本" : "新帳本"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">帳本名稱</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日本旅遊、日常開銷" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-100 border-none transition-all" autoFocus /><button onClick={() => onSave(name, initialData?.status)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200 active:scale-95 transition-transform">儲存帳本</button>{initialData && <button onClick={() => { if(confirm('確定要永久刪除帳本與所有資料嗎？')) onDelete(initialData.id); onClose(); }} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors">刪除此帳本</button>}</div></ModalLayout>);
+    return (<ModalLayout title={initialData ? "編輯帳本" : "新帳本"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">帳本名稱</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日常開銷" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none border-none transition-all" autoFocus /><button onClick={() => onSave(name, initialData?.status)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200">儲存帳本</button>{initialData && <button onClick={() => { if(confirm('確定要永久刪除帳本嗎？')) onDelete(initialData.id); onClose(); }} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors">刪除此帳本</button>}</div></ModalLayout>);
 };
 
 const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) => {
@@ -446,7 +521,7 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
     <ModalLayout title={initialData ? "修改紀錄" : "記一筆"} onClose={onClose}>
       <div className="space-y-4 pt-2">
         <div className="bg-gray-50 p-5 rounded-3xl text-center font-black text-4xl text-gray-800 shadow-inner overflow-hidden h-16 flex items-center justify-center">{amount ? formatMoney(amount) : '$0'}</div>
-        <div className="flex gap-2"><input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 p-3 rounded-2xl text-xs font-bold border-none outline-none focus:ring-2 focus:ring-blue-100" /><input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="點擊輸入備註..." className="bg-gray-50 p-3 rounded-2xl flex-1 text-xs font-bold border-none outline-none focus:ring-2 focus:ring-blue-100" /></div>
+        <div className="flex gap-2"><input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 p-3 rounded-2xl text-xs font-bold border-none outline-none" /><input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="點擊輸入備註..." className="bg-gray-50 p-3 rounded-2xl flex-1 text-xs font-bold border-none outline-none" /></div>
         <div className="flex overflow-x-auto gap-2 pb-1 hide-scrollbar">{CATEGORIES.map(c => (<button key={c.id} onClick={() => setCategory(c.id)} className={`px-4 py-2 rounded-2xl text-[10px] font-bold whitespace-nowrap transition-all ${category === c.id ? 'bg-gray-800 text-white shadow-md' : 'bg-white border text-gray-400'}`}>{c.name}</button>))}</div>
         <div className="grid grid-cols-2 gap-3"><div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">付款人<div className="flex gap-2 mt-2"><button onClick={()=>setPaidBy('bf')} className={`flex-1 py-2 rounded-xl font-black transition-all ${paidBy==='bf'?'bg-blue-500 text-white shadow-md shadow-blue-100':'bg-white text-gray-300'}`}>男友</button><button onClick={()=>setPaidBy('gf')} className={`flex-1 py-2 rounded-xl font-black transition-all ${paidBy==='gf'?'bg-pink-500 text-white shadow-md shadow-pink-100':'bg-white text-gray-300'}`}>女友</button></div></div><div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">分帳方式<select value={splitType} onChange={e=>setSplitType(e.target.value)} className="w-full mt-2 bg-white py-2 rounded-xl border-none outline-none text-center font-black text-gray-700 shadow-sm"><option value="shared">平分 (50/50)</option><option value="bf_personal">男友全額</option><option value="gf_personal">女友全額</option></select></div></div>
         <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(a) => onSave({ amount: a, note, date, category, paidBy, splitType })} compact />
@@ -458,7 +533,7 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
 const AddJarModal = ({ onClose, onSave, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
     const [target, setTarget] = useState(initialData?.targetAmount?.toString() || '');
-    return (<ModalLayout title={initialData ? "修改目標" : "新存錢目標"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">目標名稱</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="例如: 購屋基金、結婚基金" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-100 border-none transition-all" /><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">目標總金額</label><div className="bg-gray-50 p-4 rounded-2xl text-center font-black text-3xl text-gray-800">{target || '0'}</div><CalculatorKeypad value={target} onChange={setTarget} onConfirm={(t) => onSave(name, t)} compact /></div></ModalLayout>);
+    return (<ModalLayout title={initialData ? "修改目標" : "新存錢目標"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">目標名稱</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="例如: 旅遊基金" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-100 border-none transition-all" /><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">目標總金額</label><div className="bg-gray-50 p-4 rounded-2xl text-center font-black text-3xl text-gray-800">{target || '0'}</div><CalculatorKeypad value={target} onChange={setTarget} onConfirm={(t) => onSave(name, t)} compact /></div></ModalLayout>);
 };
 
 const DepositModal = ({ jar, onClose, onConfirm, role }) => {
