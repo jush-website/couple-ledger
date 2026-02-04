@@ -214,7 +214,7 @@ export default function CoupleLedgerApp() {
           t.paidBy === 'bf' ? bfLent += amt : bfLent -= amt;
       } else {
         let gfS = 0, bfS = 0;
-        if (['custom', 'ratio'].includes(t.splitType) && t.splitDetails) { gfS = t.splitDetails.gf; bfS = t.splitDetails.bf; }
+        if (['custom', 'ratio'].includes(t.splitType) && t.splitDetails) { gfS = Number(t.splitDetails.gf) || 0; bfS = Number(t.splitDetails.bf) || 0; }
         else if (t.splitType === 'shared') { gfS = amt/2; bfS = amt/2; }
         else if (t.splitType === 'gf_personal') gfS = amt;
         else if (t.splitType === 'bf_personal') bfS = amt;
@@ -236,7 +236,6 @@ export default function CoupleLedgerApp() {
     setShowAddTransaction(false); setEditingTransaction(null); setShowRepayModal(false); showToast('已儲存紀錄 ✨');
   };
 
-  // --- NEW: Delete Transaction Logic ---
   const handleDeleteTransaction = (id) => {
     setConfirmModal({
       isOpen: true,
@@ -248,7 +247,7 @@ export default function CoupleLedgerApp() {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
           showToast('已刪除紀錄 🗑️');
         } catch (e) {
-          showToast('刪除失敗，請重試');
+          showToast('刪除失敗');
         }
         setConfirmModal({ isOpen: false });
       }
@@ -425,7 +424,7 @@ const Overview = ({ transactions, debt, role, onAdd, onEdit, onScan, readOnly, o
                             {t.category === 'repayment' ? (
                                 <span className="text-green-600 font-bold">{t.paidBy === 'bf' ? '男友還給女友' : '女友還給男友'}</span>
                             ) : (
-                                <span>{t.paidBy === 'bf' ? '男友付' : '女友付'} • {t.splitType === 'shared' ? '平分' : '個人/比例'}</span>
+                                <span>{t.paidBy === 'bf' ? '男友付' : '女友付'} • {t.splitType === 'shared' ? '平分' : (t.splitType === 'ratio' || t.splitType === 'custom' ? '各花各的' : (t.splitType === 'bf_personal' ? '男友全額' : '女友全額'))}</span>
                             )}
                         </div>
                     </div>
@@ -490,7 +489,10 @@ const Statistics = ({ transactions }) => {
       if (t.splitType === 'shared') { bfShare = amt / 2; gfShare = amt / 2; } 
       else if (t.splitType === 'bf_personal') bfShare = amt;
       else if (t.splitType === 'gf_personal') gfShare = amt;
-      else if (['ratio', 'custom'].includes(t.splitType) && t.splitDetails) { bfShare = t.splitDetails.bf; gfShare = t.splitDetails.gf; }
+      else if (['ratio', 'custom'].includes(t.splitType) && t.splitDetails) { 
+          bfShare = Number(t.splitDetails.bf) || 0; 
+          gfShare = Number(t.splitDetails.gf) || 0; 
+      }
       bfActualTotal += bfShare; gfActualTotal += gfShare;
     });
     const chartData = Object.entries(categoryMap).map(([id, value]) => ({ id, value, color: CATEGORIES.find(c => c.id === id)?.color || '#999', name: CATEGORIES.find(c => c.id === id)?.name || '未知' })).sort((a, b) => b.value - a.value);
@@ -515,11 +517,11 @@ const Statistics = ({ transactions }) => {
         <h3 className="text-xs font-black text-gray-400 mb-4 flex items-center gap-2 uppercase tracking-widest"><Percent size={14}/> 分帳後實質支出</h3>
         <div className="grid grid-cols-2 gap-4">
             <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                <div className="text-[10px] font-bold text-blue-400 mb-1">👦 男朋友</div>
+                <div className="text-[10px] font-bold text-blue-400 mb-1">👦 男朋友負擔</div>
                 <div className="text-xl font-black text-blue-600">{formatMoney(stats.bfActualTotal)}</div>
             </div>
             <div className="bg-pink-50 p-4 rounded-2xl border border-pink-100">
-                <div className="text-[10px] font-bold text-pink-400 mb-1">👧 女朋友</div>
+                <div className="text-[10px] font-bold text-pink-400 mb-1">👧 女朋友負擔</div>
                 <div className="text-xl font-black text-pink-600">{formatMoney(stats.gfActualTotal)}</div>
             </div>
         </div>
@@ -541,27 +543,18 @@ const Statistics = ({ transactions }) => {
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
             <History size={18} className="text-gray-400"/>
-            <h3 className="font-bold text-gray-700">{currentDate.getMonth() + 1}月 詳細消費清單</h3>
+            <h3 className="font-bold text-gray-700">{currentDate.getMonth() + 1}月 消費明細</h3>
         </div>
         <div className="divide-y divide-gray-50 max-h-96 overflow-y-auto hide-scrollbar">
-            {monthTransactions.length === 0 ? (
-                <div className="p-10 text-center text-gray-300 font-bold italic text-sm">該月份無消費紀錄</div>
-            ) : (
-                monthTransactions.map(t => (
-                    <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                        <div className="flex items-center gap-3">
-                            <div className="text-[10px] bg-gray-100 px-2 py-1 rounded font-mono text-gray-400">
-                                {t.date?.split('-')[2]}日
-                            </div>
-                            <div>
-                                <div className="text-sm font-bold text-gray-800">{t.note || '消費'}</div>
-                                <div className="text-[10px] text-gray-400">{CATEGORIES.find(c=>c.id===t.category)?.name}</div>
-                            </div>
-                        </div>
-                        <div className="text-sm font-bold text-gray-700">{formatMoney(t.amount)}</div>
+            {monthTransactions.map(t => (
+                <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
+                    <div className="flex items-center gap-3">
+                        <div className="text-[10px] bg-gray-100 px-2 py-1 rounded font-mono text-gray-400">{t.date?.split('-')[2]}日</div>
+                        <div><div className="text-sm font-bold text-gray-800">{t.note || '消費'}</div><div className="text-[10px] text-gray-400">{CATEGORIES.find(c=>c.id===t.category)?.name}</div></div>
                     </div>
-                ))
-            )}
+                    <div className="text-sm font-bold text-gray-700">{formatMoney(t.amount)}</div>
+                </div>
+            ))}
         </div>
       </div>
     </div>
@@ -607,7 +600,7 @@ const ModalLayout = ({ title, onClose, children }) => (
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
-    return (<ModalLayout title={initialData ? "編輯帳本" : "新帳本"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">帳本名稱</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日常開銷" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none border-none transition-all" autoFocus /><button onClick={() => onSave(name, initialData?.status)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200">儲存帳本</button>{initialData && <button onClick={() => { if(confirm('確定要永久刪除帳本嗎？這將連同所有記帳紀錄一併刪除且無法復原！')) { onDelete(initialData.id); onClose(); } }} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors">永久刪除帳本 (危險動作)</button>}</div></ModalLayout>);
+    return (<ModalLayout title={initialData ? "編輯帳本" : "新帳本"} onClose={onClose}><div className="space-y-4 pt-2"><label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">帳本名稱</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="例如: 日常開銷" className="w-full bg-gray-50 p-4 rounded-2xl font-bold outline-none border-none transition-all" autoFocus /><button onClick={() => onSave(name, initialData?.status)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200">儲存帳本</button>{initialData && <button onClick={() => { if(confirm('確定要永久刪除帳本嗎？')) { onDelete(initialData.id); onClose(); } }} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 rounded-xl transition-colors">永久刪除帳本</button>}</div></ModalLayout>);
 };
 
 const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) => {
@@ -617,14 +610,110 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   const [category, setCategory] = useState(initialData?.category || 'food');
   const [paidBy, setPaidBy] = useState(initialData?.paidBy || currentUserRole);
   const [splitType, setSplitType] = useState(initialData?.splitType || 'shared');
+  
+  // 各花多少分配的狀態
+  const [customBf, setCustomBf] = useState(initialData?.splitDetails?.bf || '');
+  const [customGf, setCustomGf] = useState(initialData?.splitDetails?.gf || '');
+  const [ratioValue, setRatioValue] = useState(initialData?.splitType === 'ratio' && initialData.amount ? Math.round((initialData.splitDetails.bf / initialData.amount) * 100) : 50);
+
+  useEffect(() => {
+    if (splitType === 'ratio') {
+        const total = Number(safeCalculate(amount)) || 0;
+        const bf = Math.round(total * (ratioValue / 100));
+        setCustomBf(bf.toString());
+        setCustomGf((total - bf).toString());
+    }
+  }, [amount, ratioValue, splitType]);
+
+  const handleCustomChange = (who, val) => {
+    const numVal = Number(val);
+    const total = Number(safeCalculate(amount)) || 0;
+    if (who === 'bf') { setCustomBf(val); setCustomGf((total - numVal).toString()); } 
+    else { setCustomGf(val); setCustomBf((total - numVal).toString()); }
+  };
+
+  const handleFinalSave = (finalAmount) => {
+      const numAmount = Number(finalAmount);
+      if (isNaN(numAmount) || numAmount <= 0) return;
+      
+      const payload = {
+          amount: numAmount,
+          note,
+          date,
+          category,
+          paidBy,
+          splitType
+      };
+
+      if (splitType === 'custom' || splitType === 'ratio') {
+          payload.splitDetails = {
+              bf: Number(customBf) || 0,
+              gf: Number(customGf) || 0
+          };
+      }
+      
+      onSave(payload);
+  };
+
   return (
     <ModalLayout title={initialData ? "修改紀錄" : "記一筆"} onClose={onClose}>
       <div className="space-y-4 pt-2">
         <div className="bg-gray-50 p-5 rounded-3xl text-center font-black text-4xl text-gray-800 shadow-inner overflow-hidden h-16 flex items-center justify-center">{amount ? formatMoney(amount) : '$0'}</div>
         <div className="flex gap-2"><input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 p-3 rounded-2xl text-xs font-bold border-none outline-none" /><input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="點擊輸入備註..." className="bg-gray-50 p-3 rounded-2xl flex-1 text-xs font-bold border-none outline-none" /></div>
         <div className="flex overflow-x-auto gap-2 pb-1 hide-scrollbar">{CATEGORIES.map(c => (<button key={c.id} onClick={() => setCategory(c.id)} className={`px-4 py-2 rounded-2xl text-[10px] font-bold whitespace-nowrap transition-all ${category === c.id ? 'bg-gray-800 text-white shadow-md' : 'bg-white border text-gray-400'}`}>{c.name}</button>))}</div>
-        <div className="grid grid-cols-2 gap-3"><div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">付款人<div className="flex gap-2 mt-2"><button onClick={()=>setPaidBy('bf')} className={`flex-1 py-2 rounded-xl font-black transition-all ${paidBy==='bf'?'bg-blue-500 text-white shadow-md shadow-blue-100':'bg-white text-gray-300'}`}>男友</button><button onClick={()=>setPaidBy('gf')} className={`flex-1 py-2 rounded-xl font-black transition-all ${paidBy==='gf'?'bg-pink-500 text-white shadow-md shadow-pink-100':'bg-white text-gray-300'}`}>女友</button></div></div><div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">分帳方式<select value={splitType} onChange={e=>setSplitType(e.target.value)} className="w-full mt-2 bg-white py-2 rounded-xl border-none outline-none text-center font-black text-gray-700 shadow-sm"><option value="shared">平分 (50/50)</option><option value="bf_personal">男友全額</option><option value="gf_personal">女友全額</option></select></div></div>
-        <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(a) => onSave({ amount: a, note, date, category, paidBy, splitType })} compact />
+        
+        <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">
+                付款人
+                <div className="flex gap-2 mt-2">
+                    <button onClick={()=>setPaidBy('bf')} className={`flex-1 py-2 rounded-xl font-black transition-all ${paidBy==='bf'?'bg-blue-500 text-white shadow-md shadow-blue-100':'bg-white text-gray-300'}`}>男友</button>
+                    <button onClick={()=>setPaidBy('gf')} className={`flex-1 py-2 rounded-xl font-black transition-all ${paidBy==='gf'?'bg-pink-500 text-white shadow-md shadow-pink-100':'bg-white text-gray-300'}`}>女友</button>
+                </div>
+            </div>
+            <div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">
+                分帳方式
+                <select value={splitType} onChange={e=>setSplitType(e.target.value)} className="w-full mt-2 bg-white py-2 rounded-xl border-none outline-none text-center font-black text-gray-700 shadow-sm">
+                    <option value="shared">平分 (50/50)</option>
+                    <option value="ratio">比例分帳 (滑動)</option>
+                    <option value="custom">各花多少 (輸入)</option>
+                    <option value="bf_personal">男友全額負擔</option>
+                    <option value="gf_personal">女友全額負擔</option>
+                </select>
+            </div>
+        </div>
+
+        {/* 比例分帳 UI */}
+        {splitType === 'ratio' && (
+            <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100 animate-fade-in">
+                <div className="flex justify-between text-[10px] font-bold text-gray-500 mb-2">
+                    <span className="text-blue-500">男友 {ratioValue}%</span>
+                    <span className="text-pink-500">女友 {100 - ratioValue}%</span>
+                </div>
+                <input type="range" min="0" max="100" value={ratioValue} onChange={(e)=>setRatioValue(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500" />
+                <div className="flex justify-between mt-2 text-xs font-black">
+                    <span className="text-blue-600">{formatMoney(customBf)}</span>
+                    <span className="text-pink-600">{formatMoney(customGf)}</span>
+                </div>
+            </div>
+        )}
+
+        {/* 各花多少 UI */}
+        {splitType === 'custom' && (
+            <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 animate-fade-in">
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-[10px] text-gray-400 font-bold block mb-1">男友負擔</label>
+                        <input type="number" value={customBf} onChange={(e)=>handleCustomChange('bf', e.target.value)} className="w-full p-2 rounded-xl text-center font-black text-blue-600 border-none outline-none focus:ring-2 focus:ring-blue-200" placeholder="0" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] text-gray-400 font-bold block mb-1">女友負擔</label>
+                        <input type="number" value={customGf} onChange={(e)=>handleCustomChange('gf', e.target.value)} className="w-full p-2 rounded-xl text-center font-black text-pink-600 border-none outline-none focus:ring-2 focus:ring-pink-200" placeholder="0" />
+                    </div>
+                </div>
+            </div>
+        )}
+
+        <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={handleFinalSave} compact />
       </div>
     </ModalLayout>
   );
