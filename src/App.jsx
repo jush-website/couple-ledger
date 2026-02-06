@@ -942,7 +942,16 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
             <div className="flex justify-between items-start mb-4 relative z-10"><div><h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">{jar.name}<button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500"><Pencil size={14}/></button></h3><div className="text-xs text-gray-400 mt-1">目標 {formatMoney(tgt)}</div></div><div className="bg-yellow-100 text-yellow-700 font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1"><Target size={12} /> {Math.round(progress)}%</div></div>
             <div className="mb-4 relative z-10"><div className="text-3xl font-black text-gray-800 mb-1">{formatMoney(cur)}</div><div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-yellow-300 to-orange-400 transition-all duration-1000" style={{ width: `${progress}%` }}></div></div></div>
             <div className="flex justify-between items-center relative z-10">
-                <div className="flex -space-x-2"><div className="w-8 h-8 rounded-full bg-blue-100 border-2 border-white flex items-center justify-center text-[10px] text-blue-600 font-bold" title="男友貢獻">{Math.round((jar.contributions?.bf || 0) / (cur || 1) * 100)}%</div><div className="w-8 h-8 rounded-full bg-pink-100 border-2 border-white flex items-center justify-center text-[10px] text-pink-600 font-bold" title="女友貢獻">{Math.round((jar.contributions?.gf || 0) / (cur || 1) * 100)}%</div></div>
+                <div className="flex gap-2">
+                    <div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻">
+                        <span>👦</span>
+                        <span>{formatMoney(jar.contributions?.bf || 0)}</span>
+                    </div>
+                    <div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻">
+                        <span>👧</span>
+                        <span>{formatMoney(jar.contributions?.gf || 0)}</span>
+                    </div>
+                </div>
                 <div className="flex gap-2">
                     <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button>
                     <button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>
