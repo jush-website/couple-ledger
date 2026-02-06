@@ -12,7 +12,7 @@ import {
   Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
-  ArrowLeft, Check, History, Percent, Book, MoreHorizontal,
+  ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
   Camera, Archive, Reply, Loader2, Image as ImageIcon
 } from 'lucide-react';
 
@@ -305,6 +305,7 @@ export default function CoupleLedgerApp() {
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
   const [showJarHistory, setShowJarHistory] = useState(null); 
+  const [repaymentDebt, setRepaymentDebt] = useState(null); // Controls Repayment Modal
     
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
@@ -430,6 +431,7 @@ export default function CoupleLedgerApp() {
       }
       setShowAddTransaction(false);
       setEditingTransaction(null);
+      setRepaymentDebt(null); // Close repayment if open
     } catch (e) { console.error(e); }
   };
 
@@ -675,6 +677,7 @@ export default function CoupleLedgerApp() {
                     if(viewArchived) return;
                     handleDeleteTransaction(id);
                 }} 
+                onRepay={(debt) => setRepaymentDebt(debt)}
             />
         )}
 
@@ -720,6 +723,14 @@ export default function CoupleLedgerApp() {
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
       {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
       
+      {repaymentDebt !== null && (
+          <RepaymentModal 
+              debt={repaymentDebt} 
+              onClose={() => setRepaymentDebt(null)} 
+              onSave={handleSaveTransaction}
+          />
+      )}
+
       {showBookManager && (
           <BookManagerModal 
             onClose={() => setShowBookManager(false)} 
@@ -751,13 +762,17 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnly }) => {
+const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay, readOnly }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
     transactions.forEach(t => {
       const amt = Number(t.amount) || 0;
       if (t.category === 'repayment') {
-        t.paidBy === 'bf' ? bfLent -= amt : bfLent += amt;
+        // Repayment Logic: 
+        // If BF pays (gives money to GF), BF is creditor (Lends) -> bfLent increases.
+        // If GF pays (gives money to BF), BF is debtor (Borrows) -> bfLent decreases.
+        // This ensures a repayment transaction cancels out the previous debt.
+        t.paidBy === 'bf' ? bfLent += amt : bfLent -= amt;
       } else {
         let gfShare = 0, bfShare = 0;
         if ((t.splitType === 'custom' || t.splitType === 'ratio') && t.splitDetails) {
@@ -790,6 +805,16 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
         <div className="flex items-center justify-center gap-2">
           {Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500 flex items-center gap-2"><CheckCircle /> 互不相欠</div> : <><span className={`text-3xl font-black ${debt > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debt > 0 ? '男朋友' : '女朋友'}</span><span className="text-gray-400 text-sm">先墊了</span><span className="text-2xl font-bold text-gray-800">{formatMoney(Math.abs(debt))}</span></>}
         </div>
+        
+        {/* Repayment Button */}
+        {Math.abs(debt) > 0 && !readOnly && (
+            <button 
+                onClick={() => onRepay(debt)}
+                className="mt-4 px-6 py-2 bg-gray-900 text-white text-sm font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 mx-auto"
+            >
+                <RefreshCw size={16} /> 登記還款
+            </button>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -830,7 +855,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
                     <div className="min-w-0 flex-1">
                         <div className="font-bold text-gray-800 truncate">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div>
                         <div className="text-xs text-gray-400 flex gap-1 truncate"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>
-                            {t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : (t.splitType === 'ratio' ? `比例 (${Math.round((t.splitDetails?.bf / (Number(t.amount)||1))*100)}%)` : '自訂分帳')))}
+                            {t.category === 'repayment' ? '還款結清' : (t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : (t.splitType === 'ratio' ? `比例 (${Math.round((t.splitDetails?.bf / (Number(t.amount)||1))*100)}%)` : '自訂分帳'))))}
                         </span></div>
                     </div>
                   </div>
@@ -846,6 +871,67 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, readOnl
     </div>
   );
 };
+
+const RepaymentModal = ({ debt, onClose, onSave }) => {
+    // debt > 0: GF owes BF (BF Lent). Payer should be GF.
+    // debt < 0: BF owes GF (GF Lent). Payer should be BF.
+    const isGFOwing = debt > 0;
+    const payer = isGFOwing ? 'gf' : 'bf';
+    const receiver = isGFOwing ? 'bf' : 'gf';
+    
+    const [amount, setAmount] = useState(Math.abs(debt).toString());
+
+    return (
+        <ModalLayout title="還款 / 結清" onClose={onClose}>
+             <div className="space-y-4 pt-2">
+                <div className="bg-green-50 p-4 rounded-2xl flex items-center justify-between border border-green-100">
+                    <div className="flex flex-col items-center gap-1 w-1/3">
+                         <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${payer === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>
+                            {payer === 'bf' ? '👦' : '👧'}
+                         </div>
+                         <span className="text-xs font-bold text-gray-500">還款人</span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center">
+                        <ArrowRight size={24} className="text-green-400 animate-pulse" />
+                        <span className="text-xs font-bold text-green-600 mt-1">還給</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 w-1/3">
+                         <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${receiver === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>
+                            {receiver === 'bf' ? '👦' : '👧'}
+                         </div>
+                         <span className="text-xs font-bold text-gray-500">收款人</span>
+                    </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-2xl text-center">
+                    <div className="text-xs text-gray-400 mb-1">還款金額</div>
+                    <div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">
+                        {amount}
+                    </div>
+                </div>
+                
+                <CalculatorKeypad 
+                    value={amount} 
+                    onChange={setAmount} 
+                    onConfirm={(val) => {
+                        const num = Number(val);
+                        if (num > 0) {
+                            onSave({
+                                amount: num,
+                                category: 'repayment',
+                                date: new Date().toISOString().split('T')[0],
+                                note: '還款結清',
+                                paidBy: payer,
+                                splitType: 'shared' // irrelevant for repayment but good for schema consistency
+                            });
+                        }
+                    }} 
+                    compact={true} 
+                />
+             </div>
+        </ModalLayout>
+    )
+}
 
 const Statistics = ({ transactions }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -967,6 +1053,7 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
   </div>
 );
 
+// ... existing settings, modal helpers ...
 const SettingsView = ({ role, onLogout }) => (
   <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
