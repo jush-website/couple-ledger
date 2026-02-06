@@ -879,7 +879,7 @@ const RepaymentModal = ({ debt, onClose, onSave }) => {
     const payer = isGFOwing ? 'gf' : 'bf';
     const receiver = isGFOwing ? 'bf' : 'gf';
     
-    const [amount, setAmount] = useState(Math.abs(debt).toString());
+    const [amount, setAmount] = useState('');
 
     return (
         <ModalLayout title="還款 / 結清" onClose={onClose}>
@@ -906,7 +906,7 @@ const RepaymentModal = ({ debt, onClose, onSave }) => {
                 <div className="bg-gray-50 p-3 rounded-2xl text-center">
                     <div className="text-xs text-gray-400 mb-1">還款金額</div>
                     <div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">
-                        {amount}
+                        {amount ? amount : <span className="text-gray-300 text-lg">輸入還款金額</span>}
                     </div>
                 </div>
                 
