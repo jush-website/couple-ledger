@@ -938,6 +938,14 @@ const Statistics = ({ transactions }) => {
   
   const monthTransactions = useMemo(() => transactions.filter(t => { const d = new Date(t.date); return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear() && t.category !== 'repayment'; }), [transactions, currentDate]);
   
+  // New: Calculate monthly split totals
+  const monthlyTotals = useMemo(() => {
+      return monthTransactions.reduce((acc, t) => {
+          const { bf, gf } = calculateExpense(t);
+          return { bf: acc.bf + bf, gf: acc.gf + gf };
+      }, { bf: 0, gf: 0 });
+  }, [monthTransactions]);
+
   const chartData = useMemo(() => {
     const map = {}; let total = 0;
     monthTransactions.forEach(t => { const amt = Number(t.amount) || 0; if (!map[t.category]) map[t.category] = 0; map[t.category] += amt; total += amt; });
@@ -964,6 +972,21 @@ const Statistics = ({ transactions }) => {
         <span className="font-bold text-lg">{currentDate.getFullYear()}年 {currentDate.getMonth() + 1}月</span>
         <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight /></button>
       </div>
+
+      {/* Monthly Breakdown Cards */}
+      <div className="flex gap-3 px-1">
+          <div className="flex-1 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-blue-400"></div>
+              <span className="text-xs font-bold text-gray-400 mb-1">👦 男友本月花費</span>
+              <span className="text-xl font-black text-blue-600">{formatMoney(monthlyTotals.bf)}</span>
+          </div>
+          <div className="flex-1 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-pink-400"></div>
+              <span className="text-xs font-bold text-gray-400 mb-1">👧 女友本月花費</span>
+              <span className="text-xl font-black text-pink-600">{formatMoney(monthlyTotals.gf)}</span>
+          </div>
+      </div>
+
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center">
         <SimpleDonutChart data={chartData.data} total={chartData.total} />
         <div className="flex flex-wrap gap-2 justify-center mt-4">{chartData.data.map(d => (<div key={d.id} className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-50 border border-gray-100"><div className="w-2 h-2 rounded-full" style={{ background: d.color }}></div><span>{d.name}</span><span className="font-bold">{chartData.total ? Math.round(d.value / chartData.total * 100) : 0}%</span></div>))}</div>
