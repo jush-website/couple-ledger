@@ -13,7 +13,7 @@ import {
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
-  Camera, Archive, Reply, Loader2, Image as ImageIcon
+  Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -295,7 +295,6 @@ export default function CoupleLedgerApp() {
   const [jars, setJars] = useState([]);
   const [books, setBooks] = useState([]);
   
-  // Book filtering states
   const [activeBookId, setActiveBookId] = useState(null);
   const [viewArchived, setViewArchived] = useState(false);
 
@@ -305,7 +304,8 @@ export default function CoupleLedgerApp() {
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
   const [showJarHistory, setShowJarHistory] = useState(null); 
-  const [repaymentDebt, setRepaymentDebt] = useState(null); // Controls Repayment Modal
+  const [repaymentDebt, setRepaymentDebt] = useState(null);
+  const [showRoulette, setShowRoulette] = useState(false);
     
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
@@ -327,7 +327,6 @@ export default function CoupleLedgerApp() {
                 await signInWithCustomToken(auth, __initial_auth_token); 
             } catch(e) { 
                 console.warn("Custom token failed, attempting anonymous sign-in:", e);
-                // Fallback to anonymous sign in if custom token fails
                 try { await signInAnonymously(auth); } catch (e2) { console.error("Anonymous fallback failed:", e2); }
             }
         } else {
@@ -341,7 +340,6 @@ export default function CoupleLedgerApp() {
     return () => { clearTimeout(timer); unsubscribe(); };
   }, []);
 
-  // Initialize Data Listeners
   useEffect(() => {
     if (!user) return;
     try {
@@ -349,44 +347,30 @@ export default function CoupleLedgerApp() {
         const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
         const booksRef = collection(db, 'artifacts', appId, 'public', 'data', 'books');
         
-        // Listen to Books
         const unsubBooks = onSnapshot(booksRef, async (s) => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Sort by CreatedAt
             data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-            
-            // If no books exist, create default one
             if (data.length === 0 && !s.metadata.hasPendingWrites) {
                await addDoc(booksRef, { name: "預設帳本", status: 'active', createdAt: serverTimestamp() });
                return; 
             }
-            
             setBooks(data);
-            
-            // Set active book intelligently
             setActiveBookId(prev => {
-                // If current selection is valid, keep it
                 if (prev && data.find(b => b.id === prev)) return prev;
-                // Otherwise find first active book
                 const firstActive = data.find(b => (b.status || 'active') === 'active');
                 if (firstActive) return firstActive.id;
-                // Fallback to first book (even if archived)
                 return data[0]?.id || null;
             });
         });
 
         const unsubTrans = onSnapshot(transRef, (s) => {
           const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-          
           data.sort((a, b) => {
             const dateA = new Date(a.date).getTime();
             const dateB = new Date(b.date).getTime();
             if (dateB !== dateA) return dateB - dateA;
-            const timeA = a.createdAt?.seconds || 0;
-            const timeB = b.createdAt?.seconds || 0;
-            return timeB - timeA;
+            return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
           });
-
           setTransactions(data);
         });
 
@@ -395,18 +379,15 @@ export default function CoupleLedgerApp() {
     } catch (e) { console.error(e); }
   }, [user]);
 
-  // Derived filtered transactions based on Active Book
   const filteredTransactions = useMemo(() => {
       if (!activeBookId) return [];
       const defaultBookId = books[0]?.id;
       return transactions.filter(t => {
           if (t.bookId) return t.bookId === activeBookId;
-          // Legacy data handling
           return activeBookId === defaultBookId;
       });
   }, [transactions, activeBookId, books]);
 
-  // Derived filtered books based on view mode (Active vs Archived)
   const displayBooks = useMemo(() => {
       return books.filter(b => {
           const status = b.status || 'active';
@@ -416,12 +397,11 @@ export default function CoupleLedgerApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  // --- Transaction Actions ---
   const handleSaveTransaction = async (data) => {
     if (!user) return;
     try {
       const finalAmount = Number(safeCalculate(data.amount));
-      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId }; // Attach bookId
+      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId }; 
       if (editingTransaction) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
         showToast('紀錄已更新 ✨');
@@ -431,7 +411,7 @@ export default function CoupleLedgerApp() {
       }
       setShowAddTransaction(false);
       setEditingTransaction(null);
-      setRepaymentDebt(null); // Close repayment if open
+      setRepaymentDebt(null); 
     } catch (e) { console.error(e); }
   };
 
@@ -446,7 +426,6 @@ export default function CoupleLedgerApp() {
     });
   };
 
-  // --- Jar Actions ---
   const handleSaveJar = async (name, target) => {
     if (!user) return;
     try {
@@ -487,12 +466,20 @@ export default function CoupleLedgerApp() {
     try {
       const depositAmount = Number(safeCalculate(amount));
       const newAmount = (jar.currentAmount || 0) + depositAmount;
-      const newContrib = { ...jar.contributions, [contributorRole]: (jar.contributions?.[contributorRole] || 0) + depositAmount };
+      
+      const newContrib = { ...jar.contributions };
+      if (contributorRole === 'both') {
+          const half = depositAmount / 2;
+          newContrib.bf = (newContrib.bf || 0) + half;
+          newContrib.gf = (newContrib.gf || 0) + half;
+      } else {
+          newContrib[contributorRole] = (newContrib[contributorRole] || 0) + depositAmount;
+      }
       
       const newHistoryItem = {
           id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
           amount: depositAmount,
-          role: contributorRole,
+          role: contributorRole, 
           date: new Date().toISOString()
       };
       const newHistory = [newHistoryItem, ...(jar.history || [])];
@@ -512,7 +499,15 @@ export default function CoupleLedgerApp() {
         const diff = Number(newAmount) - oldItem.amount;
         const newTotal = (jar.currentAmount || 0) + diff;
         const newContrib = { ...jar.contributions };
-        newContrib[oldItem.role] = (newContrib[oldItem.role] || 0) + diff;
+        
+        if (oldItem.role === 'both') {
+            const halfDiff = diff / 2;
+            newContrib.bf = (newContrib.bf || 0) + halfDiff;
+            newContrib.gf = (newContrib.gf || 0) + halfDiff;
+        } else {
+            newContrib[oldItem.role] = (newContrib[oldItem.role] || 0) + diff;
+        }
+
         const newHistory = (jar.history || []).map(item => item.id === oldItem.id ? { ...item, amount: Number(newAmount) } : item);
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
         showToast('紀錄已修正 ✨');
@@ -526,7 +521,15 @@ export default function CoupleLedgerApp() {
             try {
                 const newTotal = (jar.currentAmount || 0) - item.amount;
                 const newContrib = { ...jar.contributions };
-                newContrib[item.role] = Math.max(0, (newContrib[item.role] || 0) - item.amount);
+                
+                if (item.role === 'both') {
+                    const half = item.amount / 2;
+                    newContrib.bf = Math.max(0, (newContrib.bf || 0) - half);
+                    newContrib.gf = Math.max(0, (newContrib.gf || 0) - half);
+                } else {
+                    newContrib[item.role] = Math.max(0, (newContrib[item.role] || 0) - item.amount);
+                }
+
                 const newHistory = (jar.history || []).filter(h => h.id !== item.id);
                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
                 showToast('紀錄已刪除 🗑️');
@@ -536,7 +539,6 @@ export default function CoupleLedgerApp() {
     });
   };
 
-  // --- Book Actions ---
   const handleSaveBook = async (name, status = 'active') => {
       if(!user || !name.trim()) return;
       try {
@@ -558,7 +560,6 @@ export default function CoupleLedgerApp() {
   };
 
   const handleDeleteBook = async (bookId) => {
-      // Don't check length if deleting archived
       if(books.filter(b => (b.status||'active') === 'active').length <= 1 && editingBook?.status !== 'archived') {
           showToast('至少需要保留一個使用中的帳本 ⚠️');
           return;
@@ -567,22 +568,16 @@ export default function CoupleLedgerApp() {
         isOpen: true, title: "刪除帳本", message: "確定要永久刪除這個帳本嗎？裡面的記帳紀錄也會一併刪除！(無法復原)", isDanger: true,
         onConfirm: async () => {
             try {
-                // Delete the book doc
                 await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', bookId));
-                
-                // Find and delete all related transactions
                 const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), where("bookId", "==", bookId));
                 const snap = await getDocs(q);
                 const batch = writeBatch(db);
                 snap.docs.forEach(d => batch.delete(d.ref));
                 await batch.commit();
-
-                // If deleting active book, switch to another
                 if(activeBookId === bookId) {
                     const remaining = books.filter(b => b.id !== bookId && (b.status||'active') === 'active');
                     if(remaining.length > 0) setActiveBookId(remaining[0].id);
                 }
-                
                 showToast('帳本已刪除 🗑️');
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
             } catch(e) { console.error(e); }
@@ -601,7 +596,6 @@ export default function CoupleLedgerApp() {
       setShowAddTransaction(true);
   };
 
-
   if (loading) return <AppLoading />;
   if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role', r); }} />;
 
@@ -615,7 +609,6 @@ export default function CoupleLedgerApp() {
             <h1 className="text-lg font-bold tracking-wide">我們的小金庫</h1>
           </div>
           <div className="flex items-center gap-3">
-              {/* Archive Toggle */}
               {activeTab === 'overview' && (
                   <button 
                     onClick={() => setViewArchived(!viewArchived)}
@@ -631,7 +624,6 @@ export default function CoupleLedgerApp() {
       </div>
 
       <div className="max-w-2xl mx-auto p-4">
-        {/* Book Selector UI (Only on Overview) */}
         {activeTab === 'overview' && (
              <div className="mb-4">
                  {viewArchived && <div className="text-xs text-gray-400 mb-2 font-bold flex items-center gap-1"><Archive size={12}/> 歷史封存區 (唯讀模式)</div>}
@@ -669,7 +661,7 @@ export default function CoupleLedgerApp() {
                 onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
                 onScan={() => setShowScanner(true)}
                 onEdit={(t) => { 
-                    if(viewArchived) return; // Read only
+                    if(viewArchived) return; 
                     setEditingTransaction(t); 
                     setShowAddTransaction(true); 
                 }} 
@@ -689,7 +681,18 @@ export default function CoupleLedgerApp() {
                 <Statistics transactions={filteredTransactions} />
             </div>
         )}
-        {activeTab === 'savings' && <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j)} />}
+        {activeTab === 'savings' && (
+            <Savings 
+                jars={jars} 
+                role={role} 
+                onAdd={() => { setEditingJar(null); setShowAddJar(true); }} 
+                onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} 
+                onDeposit={(id) => setShowJarDeposit(id)} 
+                onDelete={handleDeleteJar} 
+                onHistory={(j) => setShowJarHistory(j)} 
+                onOpenRoulette={() => setShowRoulette(true)}
+            />
+        )}
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
 
@@ -723,6 +726,8 @@ export default function CoupleLedgerApp() {
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
       {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
       
+      {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
+
       {repaymentDebt !== null && (
           <RepaymentModal 
               debt={repaymentDebt} 
@@ -768,10 +773,6 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
     transactions.forEach(t => {
       const amt = Number(t.amount) || 0;
       if (t.category === 'repayment') {
-        // Repayment Logic: 
-        // If BF pays (gives money to GF), BF is creditor (Lends) -> bfLent increases.
-        // If GF pays (gives money to BF), BF is debtor (Borrows) -> bfLent decreases.
-        // This ensures a repayment transaction cancels out the previous debt.
         t.paidBy === 'bf' ? bfLent += amt : bfLent -= amt;
       } else {
         let gfShare = 0, bfShare = 0;
@@ -806,7 +807,6 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
           {Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500 flex items-center gap-2"><CheckCircle /> 互不相欠</div> : <><span className={`text-3xl font-black ${debt > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debt > 0 ? '男朋友' : '女朋友'}</span><span className="text-gray-400 text-sm">先墊了</span><span className="text-2xl font-bold text-gray-800">{formatMoney(Math.abs(debt))}</span></>}
         </div>
         
-        {/* Repayment Button */}
         {Math.abs(debt) > 0 && !readOnly && (
             <button 
                 onClick={() => onRepay(debt)}
@@ -832,7 +832,6 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
             )}
         </div>
         {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, items]) => {
-            // Calculate daily total cost (expense) for BF and GF
             const daily = items.reduce((acc, t) => {
                const { bf, gf } = calculateExpense(t);
                return { bf: acc.bf + bf, gf: acc.gf + gf };
@@ -872,73 +871,20 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
   );
 };
 
-const RepaymentModal = ({ debt, onClose, onSave }) => {
-    // debt > 0: GF owes BF (BF Lent). Payer should be GF.
-    // debt < 0: BF owes GF (GF Lent). Payer should be BF.
-    const isGFOwing = debt > 0;
-    const payer = isGFOwing ? 'gf' : 'bf';
-    const receiver = isGFOwing ? 'bf' : 'gf';
-    
-    const [amount, setAmount] = useState('');
-
-    return (
-        <ModalLayout title="還款 / 結清" onClose={onClose}>
-             <div className="space-y-4 pt-2">
-                <div className="bg-green-50 p-4 rounded-2xl flex items-center justify-between border border-green-100">
-                    <div className="flex flex-col items-center gap-1 w-1/3">
-                         <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${payer === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>
-                            {payer === 'bf' ? '👦' : '👧'}
-                         </div>
-                         <span className="text-xs font-bold text-gray-500">還款人</span>
-                    </div>
-                    <div className="flex flex-col items-center justify-center">
-                        <ArrowRight size={24} className="text-green-400 animate-pulse" />
-                        <span className="text-xs font-bold text-green-600 mt-1">還給</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1 w-1/3">
-                         <div className={`w-12 h-12 rounded-full flex items-center justify-center text-2xl ${receiver === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>
-                            {receiver === 'bf' ? '👦' : '👧'}
-                         </div>
-                         <span className="text-xs font-bold text-gray-500">收款人</span>
-                    </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-2xl text-center">
-                    <div className="text-xs text-gray-400 mb-1">還款金額</div>
-                    <div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">
-                        {amount ? amount : <span className="text-gray-300 text-lg">輸入還款金額</span>}
-                    </div>
-                </div>
-                
-                <CalculatorKeypad 
-                    value={amount} 
-                    onChange={setAmount} 
-                    onConfirm={(val) => {
-                        const num = Number(val);
-                        if (num > 0) {
-                            onSave({
-                                amount: num,
-                                category: 'repayment',
-                                date: new Date().toISOString().split('T')[0],
-                                note: '還款結清',
-                                paidBy: payer,
-                                splitType: 'shared' // irrelevant for repayment but good for schema consistency
-                            });
-                        }
-                    }} 
-                    compact={true} 
-                />
-             </div>
-        </ModalLayout>
-    )
-}
+const SettingsView = ({ role, onLogout }) => (
+  <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+      <div className="flex items-center gap-4 mb-6"><div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl ${role === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>{role === 'bf' ? '👦' : '👧'}</div><div><h2 className="font-bold text-xl">{role === 'bf' ? '男朋友' : '女朋友'}</h2><p className="text-gray-400 text-sm">目前身分</p></div></div>
+      <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2"><LogOut size={18} /> 切換身分 (登出)</button>
+    </div>
+  </div>
+);
 
 const Statistics = ({ transactions }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   
   const monthTransactions = useMemo(() => transactions.filter(t => { const d = new Date(t.date); return d.getMonth() === currentDate.getMonth() && d.getFullYear() === currentDate.getFullYear() && t.category !== 'repayment'; }), [transactions, currentDate]);
   
-  // New: Calculate monthly split totals
   const monthlyTotals = useMemo(() => {
       return monthTransactions.reduce((acc, t) => {
           const { bf, gf } = calculateExpense(t);
@@ -954,7 +900,6 @@ const Statistics = ({ transactions }) => {
 
   const changeMonth = (delta) => { const newDate = new Date(currentDate); newDate.setMonth(newDate.getMonth() + delta); setCurrentDate(newDate); };
 
-  // Group monthTransactions by date for display
   const groupedMonthTransactions = useMemo(() => {
     const groups = {};
     monthTransactions.forEach(t => {
@@ -973,7 +918,6 @@ const Statistics = ({ transactions }) => {
         <button onClick={() => changeMonth(1)} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight /></button>
       </div>
 
-      {/* Monthly Breakdown Cards */}
       <div className="flex gap-3 px-1">
           <div className="flex-1 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-blue-400"></div>
@@ -999,7 +943,6 @@ const Statistics = ({ transactions }) => {
                 <div className="p-8 text-center text-gray-400 text-sm">尚無消費紀錄</div>
             ) : (
                 groupedMonthTransactions.map(([date, items]) => {
-                     // Calculate daily totals for Statistics view as well
                      const daily = items.reduce((acc, t) => {
                         const { bf, gf } = calculateExpense(t);
                         return { bf: acc.bf + bf, gf: acc.gf + gf };
@@ -1007,7 +950,6 @@ const Statistics = ({ transactions }) => {
 
                      return (
                          <div key={date}>
-                             {/* Daily Header for Statistics */}
                              <div className="bg-gray-50/50 px-4 py-2 flex justify-between items-center border-b border-gray-50">
                                 <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">{date.split('-')[1]}/{date.split('-')[2]}</span>
                                 <div className="flex gap-3 text-xs font-bold">
@@ -1018,7 +960,6 @@ const Statistics = ({ transactions }) => {
                              {items.map(t => (
                                  <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
                                      <div className="flex items-center gap-3">
-                                         {/* Note: Date is now in header, simplified row */}
                                          <div>
                                              <div className="font-bold text-sm text-gray-800">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div>
                                              <div className="text-xs text-gray-400" style={{ color: CATEGORIES.find(c => c.id === t.category)?.color }}>{CATEGORIES.find(c => c.id === t.category)?.name || '其他'}</div>
@@ -1037,11 +978,18 @@ const Statistics = ({ transactions }) => {
   );
 };
 
-const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) => (
+const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette }) => (
   <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
     <div className="flex justify-between items-center px-2">
       <h2 className="font-bold text-xl text-gray-800">存錢目標</h2>
-      <button onClick={onAdd} className="bg-gray-900 text-white p-2 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 text-sm font-bold pr-4"><Plus size={18} /> 新增目標</button>
+      <div className="flex gap-2">
+          <button onClick={onOpenRoulette} className="bg-white text-purple-600 p-2 rounded-xl shadow-sm border border-purple-100 active:scale-95 transition-transform flex items-center gap-1 text-xs font-bold">
+             <Dices size={16} /> 命運轉盤
+          </button>
+          <button onClick={onAdd} className="bg-gray-900 text-white p-2 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-1 text-sm font-bold pr-3">
+             <Plus size={16} /> 新增
+          </button>
+      </div>
     </div>
     <div className="grid gap-4">
       {jars.map(jar => {
@@ -1076,15 +1024,7 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory }) 
   </div>
 );
 
-// ... existing settings, modal helpers ...
-const SettingsView = ({ role, onLogout }) => (
-  <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
-    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-      <div className="flex items-center gap-4 mb-6"><div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl ${role === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>{role === 'bf' ? '👦' : '👧'}</div><div><h2 className="font-bold text-xl">{role === 'bf' ? '男朋友' : '女朋友'}</h2><p className="text-gray-400 text-sm">目前身分</p></div></div>
-      <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2"><LogOut size={18} /> 切換身分 (登出)</button>
-    </div>
-  </div>
-);
+// --- Modals ---
 
 const ModalLayout = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1100,7 +1040,6 @@ const ModalLayout = ({ title, onClose, children }) => (
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
-    // If no status, it's a legacy active book
     const [isArchived, setIsArchived] = useState(initialData?.status === 'archived');
     
     return (
@@ -1157,7 +1096,7 @@ const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
 };
 
 const ReceiptScannerModal = ({ onClose, onConfirm }) => {
-    const [step, setStep] = useState('upload'); // upload, analyzing, review
+    const [step, setStep] = useState('upload');
     const [image, setImage] = useState(null);
     const [scannedData, setScannedData] = useState(null);
     const [selectedItems, setSelectedItems] = useState({});
@@ -1169,14 +1108,12 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
         const reader = new FileReader();
         reader.onloadend = () => {
             setImage(reader.result);
-            // Extract mime type from result: "data:image/png;base64,..."
             const match = reader.result.match(/^data:(.*?);base64,(.*)$/);
             if (match) {
                  const mimeType = match[1];
                  const base64Data = match[2];
                  processImage(base64Data, mimeType);
             } else {
-                 // Fallback
                  const base64Data = reader.result.split(',')[1];
                  processImage(base64Data, "image/jpeg");
             }
@@ -1190,7 +1127,6 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
         try {
             const result = await analyzeReceiptImage(base64, mimeType);
             setScannedData(result);
-            // Default select all
             const initialSel = {};
             if (result.items && result.items.length > 0) {
                  result.items.forEach((_, i) => initialSel[i] = true);
@@ -1200,7 +1136,6 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
         } catch (e) {
             console.error(e);
             setErrorMsg("辨識失敗，可能是圖片格式不支援或 AI 無回應。");
-            // Allow retry
         }
     };
 
@@ -1211,9 +1146,7 @@ const ReceiptScannerModal = ({ onClose, onConfirm }) => {
     const handleConfirm = () => {
         const itemsToImport = scannedData.items.filter((_, i) => selectedItems[i]);
         const total = itemsToImport.reduce((acc, curr) => acc + curr.price, 0);
-        // Concatenate names for the note
         const note = itemsToImport.map(i => i.name).join(', ').substring(0, 50) + (itemsToImport.length > 2 ? '...' : '');
-        // Determine category (simple logic: mostly food -> food)
         const categories = itemsToImport.map(i => i.category);
         const modeCategory = categories.sort((a,b) => categories.filter(v=>v===a).length - categories.filter(v=>v===b).length).pop();
         
@@ -1318,7 +1251,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   const [customBf, setCustomBf] = useState(initialData?.splitDetails?.bf || '');
   const [customGf, setCustomGf] = useState(initialData?.splitDetails?.gf || '');
     
-  // Slider state
   const [ratioValue, setRatioValue] = useState(
       initialData?.splitType === 'ratio' && initialData.amount 
       ? Math.round((initialData.splitDetails.bf / initialData.amount) * 100) 
@@ -1328,7 +1260,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   const scrollRef = useRef(null);
   const scroll = (offset) => { if(scrollRef.current) scrollRef.current.scrollBy({ left: offset, behavior: 'smooth' }); };
 
-  // Effect to update customBf/Gf when ratio or amount changes in ratio mode
   useEffect(() => {
     if (splitType === 'ratio') {
         const total = Number(safeCalculate(amount)) || 0;
@@ -1415,7 +1346,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
              </div>
         </div>
 
-        {/* Ratio Slider UI */}
         {splitType === 'ratio' && (
             <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 animate-[fadeIn_0.2s]">
                 <div className="flex justify-between text-[10px] font-bold text-gray-500 mb-1">
@@ -1438,7 +1368,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
             </div>
         )}
 
-        {/* Custom Input UI */}
         {splitType === 'custom' && (<div className="bg-blue-50 p-3 rounded-xl border border-blue-100 animate-[fadeIn_0.2s]"><div className="text-[10px] text-blue-400 font-bold mb-2 text-center">輸入金額 (自動計算剩餘)</div><div className="flex gap-3 items-center"><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">男友應付</label><input type="number" value={customBf} onChange={(e) => handleCustomChange('bf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-blue-200" placeholder="0" /></div><div className="text-gray-400 font-bold">+</div><div className="flex-1"><label className="text-[10px] text-gray-500 block mb-1">女友應付</label><input type="number" value={customGf} onChange={(e) => handleCustomChange('gf', e.target.value)} className="w-full p-2 rounded-lg text-center font-bold text-sm border-none outline-none focus:ring-2 focus:ring-pink-200" placeholder="0" /></div></div></div>)}
         
         <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={handleSubmit} compact={true} />
@@ -1537,5 +1466,120 @@ const JarHistoryModal = ({ jar, onClose, onUpdateItem, onDeleteItem }) => {
             </div>
         )}
     </ModalLayout>
+  );
+};
+
+const RouletteModal = ({ jars, onClose, onConfirm, role }) => {
+  const [spinning, setSpinning] = useState(false);
+  const [result, setResult] = useState(null); 
+  const [displayNum, setDisplayNum] = useState(1);
+  const [selectedJarId, setSelectedJarId] = useState('');
+  const [depositor, setDepositor] = useState(role);
+  const intervalRef = useRef(null);
+
+  // Initialize selectedJarId when jars load
+  useEffect(() => {
+      if (jars.length > 0 && !selectedJarId) {
+          setSelectedJarId(jars[0].id);
+      }
+  }, [jars, selectedJarId]);
+
+  const spin = () => {
+      setSpinning(true);
+      setResult(null);
+      
+      // Start fast changing numbers
+      intervalRef.current = setInterval(() => {
+          setDisplayNum(Math.floor(Math.random() * 99) + 1);
+      }, 50);
+
+      // Stop after 1.5 seconds
+      setTimeout(() => {
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          const final = Math.floor(Math.random() * 99) + 1;
+          setDisplayNum(final); // Ensure display matches result immediately
+          setResult(final);
+          setSpinning(false);
+      }, 1500);
+  };
+
+  const handleDeposit = () => {
+      if(result && selectedJarId) {
+          let finalAmount = result;
+          if (depositor === 'both') {
+              finalAmount = result * 2;
+          }
+          onConfirm(selectedJarId, finalAmount.toString(), depositor);
+          onClose();
+      }
+  };
+
+  return (
+      <ModalLayout title="🎲 命運轉盤 (1~99元)" onClose={onClose}>
+          <div className="flex flex-col items-center gap-6 py-4">
+              <div className="relative w-48 h-48 rounded-full border-8 border-purple-100 flex items-center justify-center shadow-inner bg-white">
+                  <div className="absolute inset-0 rounded-full border-4 border-dashed border-purple-200 animate-spin-slow" style={{ animationDuration: spinning ? '2s' : '10s' }}></div>
+                  <div className="text-center z-10">
+                      <div className="text-xs font-bold text-gray-400 mb-1">{spinning ? '轉動中...' : (result ? '恭喜選中!' : '試試手氣')}</div>
+                      <div className={`text-6xl font-black tracking-tight transition-colors ${spinning ? 'text-gray-300 scale-90 blur-[1px]' : 'text-purple-600 scale-100'}`}>
+                          {displayNum}
+                      </div>
+                      <div className="text-sm font-bold text-purple-300 mt-1">NT$</div>
+                  </div>
+              </div>
+
+              {!result ? (
+                  <button 
+                      onClick={spin}
+                      disabled={spinning}
+                      className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 text-lg flex items-center justify-center gap-2"
+                  >
+                      {spinning ? <Loader2 className="animate-spin" /> : <Dices />}
+                      {spinning ? '命運轉動中...' : '開始轉動！'}
+                  </button>
+              ) : (
+                  <div className="w-full space-y-4 animate-[fadeIn_0.3s]">
+                      <div className="bg-gray-50 p-4 rounded-2xl space-y-3">
+                          <div className="flex justify-between items-center text-sm font-bold text-gray-600 border-b border-gray-200 pb-2">
+                              <span>存入金額</span>
+                              <div className="text-right">
+                                  <span className="text-purple-600 text-lg block">{formatMoney(depositor === 'both' ? result * 2 : result)}</span>
+                                  {depositor === 'both' && <span className="text-[10px] text-gray-400 block">({result} x 2人)</span>}
+                              </div>
+                          </div>
+                          
+                          <div>
+                               <div className="text-[10px] text-gray-400 mb-1">誰要存?</div>
+                               <div className="flex bg-white rounded-lg p-1 shadow-sm">
+                                  <button onClick={() => setDepositor('bf')} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button>
+                                  <button onClick={() => setDepositor('gf')} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button>
+                                  <button onClick={() => setDepositor('both')} className={`flex-[1.2] py-1.5 rounded-md text-xs font-bold flex items-center justify-center gap-1 ${depositor === 'both' ? 'bg-purple-100 text-purple-600' : 'text-gray-400'}`}>
+                                      <Users size={12}/> 一起 (+100%)
+                                  </button>
+                               </div>
+                          </div>
+
+                          <div>
+                               <div className="text-[10px] text-gray-400 mb-1">存到哪?</div>
+                               <select 
+                                  value={selectedJarId} 
+                                  onChange={(e) => setSelectedJarId(e.target.value)}
+                                  className="w-full bg-white p-3 rounded-lg text-sm font-bold border-none outline-none text-gray-700 shadow-sm"
+                               >
+                                   {jars.map(j => (
+                                       <option key={j.id} value={j.id}>{j.name}</option>
+                                   ))}
+                               </select>
+                          </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                          <button onClick={spin} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm">重轉一次</button>
+                          <button onClick={handleDeposit} className="flex-[2] py-3 bg-gray-900 text-white rounded-xl font-bold text-sm shadow-lg">確認存入</button>
+                      </div>
+                  </div>
+              )}
+          </div>
+      </ModalLayout>
   );
 };
