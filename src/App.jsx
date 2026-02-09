@@ -13,7 +13,8 @@ import {
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
-  Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users
+  Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users,
+  Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -70,7 +71,6 @@ const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
         
         if (!response.ok) {
             const errData = await response.json();
-            console.error("Gemini API Error:", errData);
             throw new Error(`API Error: ${errData.error?.message || response.statusText}`);
         }
 
@@ -79,7 +79,6 @@ const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
         
         if (!text) throw new Error("No response content from AI");
         
-        // Clean up markdown code blocks if present
         const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
         return JSON.parse(cleanText);
     } catch (error) {
@@ -117,6 +116,12 @@ const formatMoney = (amount) => {
   return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(num);
 };
 
+const formatWeight = (weight) => {
+    const num = Number(weight);
+    if (isNaN(num)) return '0.00克';
+    return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num) + '克';
+};
+
 const safeCalculate = (expression) => {
   try {
     const sanitized = (expression || '').toString().replace(/[^0-9+\-*/.]/g, '');
@@ -143,18 +148,17 @@ const safeCalculate = (expression) => {
       if (op === '+') result += next;
       if (op === '-') result -= next;
     }
-    return isNaN(result) || !isFinite(result) ? '' : Math.floor(result).toString();
+    return isNaN(result) || !isFinite(result) ? '' : result.toString(); 
   } catch (e) {
     return '';
   }
 };
 
-// --- Helper: Calculate Expense Split ---
 const calculateExpense = (t) => {
   const amt = Number(t.amount) || 0;
   let bf = 0, gf = 0;
   
-  if (t.category === 'repayment') return { bf: 0, gf: 0 }; // Repayment is transfer, not expense
+  if (t.category === 'repayment') return { bf: 0, gf: 0 }; 
 
   if (t.splitType === 'shared') {
     bf = amt / 2;
@@ -169,7 +173,6 @@ const calculateExpense = (t) => {
     bf = Number(t.splitDetails.bf) || 0;
     gf = Number(t.splitDetails.gf) || 0;
   } else {
-    // Fallback for legacy data or shared
     bf = amt / 2;
     gf = amt / 2;
   }
@@ -285,6 +288,55 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
+// --- Gold Chart Component ---
+const GoldChart = ({ data, period, loading }) => {
+    if (loading) {
+        return <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs"><Loader2 className="animate-spin mr-2" size={16}/> 正在從台灣銀行抓取數據...</div>;
+    }
+    
+    // Filter data based on period
+    const chartData = useMemo(() => {
+        if (!data || data.length === 0) return [];
+        if (period === '5d') return data.slice(-5);
+        if (period === '3m') return data.slice(-60); // Approx 3 months of business days
+        // Default to all available or recent (since we are scraping limited history for now)
+        return data.slice(-20); // Default view
+    }, [data, period]);
+
+    if (!chartData || chartData.length === 0) return <div className="w-full h-48 flex items-center justify-center text-gray-300 text-xs">尚無足夠的歷史數據</div>;
+
+    const prices = chartData.map(d => d.price);
+    const minPrice = Math.min(...prices) * 0.995; 
+    const maxPrice = Math.max(...prices) * 1.005;
+    const range = maxPrice - minPrice || 100;
+    
+    const getY = (price) => 100 - ((price - minPrice) / range) * 100;
+    const getX = (index) => (index / (chartData.length - 1)) * 100;
+
+    const points = chartData.map((d, i) => `${getX(i)},${getY(d.price)}`).join(' ');
+    const isUp = chartData[chartData.length - 1].price >= chartData[0].price;
+
+    return (
+        <div className="w-full h-48 relative mt-4">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+                <defs>
+                    <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0.2" />
+                        <stop offset="100%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0" />
+                    </linearGradient>
+                </defs>
+                <path d={`M0,100 L0,${getY(chartData[0].price)} ${chartData.map((d, i) => `L${getX(i)},${getY(d.price)}`).join(' ')} L100,100 Z`} fill="url(#goldGradient)" />
+                <polyline points={points} fill="none" stroke={isUp ? "#eab308" : "#22c55e"} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            </svg>
+            <div className="flex justify-between text-[10px] text-gray-400 mt-2 px-1">
+                <span>{chartData[0].label}</span>
+                {chartData.length > 5 && <span>{chartData[Math.floor(chartData.length / 2)].label}</span>}
+                <span>{chartData[chartData.length - 1].label}</span>
+            </div>
+        </div>
+    );
+};
+
 export default function CoupleLedgerApp() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -294,6 +346,7 @@ export default function CoupleLedgerApp() {
   const [transactions, setTransactions] = useState([]);
   const [jars, setJars] = useState([]);
   const [books, setBooks] = useState([]);
+  const [goldTransactions, setGoldTransactions] = useState([]);
   
   const [activeBookId, setActiveBookId] = useState(null);
   const [viewArchived, setViewArchived] = useState(false);
@@ -306,6 +359,7 @@ export default function CoupleLedgerApp() {
   const [showJarHistory, setShowJarHistory] = useState(null); 
   const [repaymentDebt, setRepaymentDebt] = useState(null);
   const [showRoulette, setShowRoulette] = useState(false);
+  const [showAddGold, setShowAddGold] = useState(false);
     
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
@@ -313,6 +367,13 @@ export default function CoupleLedgerApp() {
     
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
+
+  // Real Gold Data State
+  const [goldPrice, setGoldPrice] = useState(0); 
+  const [goldHistory, setGoldHistory] = useState([]);
+  const [goldPeriod, setGoldPeriod] = useState('1m'); // 1m (default from csv is ~20 days), 3m
+  const [goldLoading, setGoldLoading] = useState(false);
+  const [goldError, setGoldError] = useState(null);
 
   useEffect(() => {
     if (!document.querySelector('script[src*="tailwindcss"]')) {
@@ -340,12 +401,48 @@ export default function CoupleLedgerApp() {
     return () => { clearTimeout(timer); unsubscribe(); };
   }, []);
 
+  // Fetch Real Gold Price from Vercel API
+  const fetchGoldPrice = async () => {
+      setGoldLoading(true);
+      setGoldError(null);
+      try {
+          // Use relative path for Vercel API
+          const response = await fetch('/api/gold');
+          if (!response.ok) {
+              throw new Error('API Error');
+          }
+          const data = await response.json();
+          if (data.success) {
+              setGoldPrice(data.currentPrice);
+              setGoldHistory(data.history);
+          } else {
+              throw new Error(data.error || 'Failed to fetch');
+          }
+      } catch (err) {
+          console.error("Gold Fetch Error:", err);
+          setGoldError("無法連線至台銀，目前顯示為預設值");
+          setGoldPrice(2850); // Fallback
+          // Mock some data if failed just so chart isn't empty
+          setGoldHistory([{date:'-', price: 2850, label: '-'}]);
+      } finally {
+          setGoldLoading(false);
+      }
+  };
+
+  useEffect(() => {
+      // Fetch gold price when app starts or tab changes to gold
+      if (activeTab === 'gold') {
+          fetchGoldPrice();
+      }
+  }, [activeTab]);
+
   useEffect(() => {
     if (!user) return;
     try {
         const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
         const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
         const booksRef = collection(db, 'artifacts', appId, 'public', 'data', 'books');
+        const goldRef = collection(db, 'artifacts', appId, 'public', 'data', 'gold_transactions');
         
         const unsubBooks = onSnapshot(booksRef, async (s) => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -375,7 +472,14 @@ export default function CoupleLedgerApp() {
         });
 
         const unsubJars = onSnapshot(jarsRef, (s) => setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))));
-        return () => { unsubTrans(); unsubJars(); unsubBooks(); };
+        
+        const unsubGold = onSnapshot(goldRef, (s) => {
+            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            data.sort((a, b) => new Date(b.date) - new Date(a.date));
+            setGoldTransactions(data);
+        });
+
+        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); };
     } catch (e) { console.error(e); }
   }, [user]);
 
@@ -415,6 +519,26 @@ export default function CoupleLedgerApp() {
     } catch (e) { console.error(e); }
   };
 
+  const handleSaveGold = async (data) => {
+      if(!user) return;
+      try {
+          const weight = Number(data.weight);
+          const price = Number(data.price);
+          const totalCost = Number(data.totalCost);
+          
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'gold_transactions'), {
+              date: data.date,
+              weight,
+              pricePerGram: price,
+              totalCost,
+              type: 'buy', // default to buy for now
+              createdAt: serverTimestamp()
+          });
+          showToast('黃金已入庫 💰');
+          setShowAddGold(false);
+      } catch(e) { console.error(e); }
+  };
+
   const handleDeleteTransaction = (id) => {
     setConfirmModal({
       isOpen: true, title: "刪除紀錄", message: "確定要刪除這筆紀錄嗎？", isDanger: true,
@@ -424,6 +548,17 @@ export default function CoupleLedgerApp() {
         setConfirmModal({ isOpen: false });
       }
     });
+  };
+  
+  const handleDeleteGold = (id) => {
+      setConfirmModal({
+          isOpen: true, title: "刪除黃金紀錄", message: "確定要刪除這筆買入紀錄嗎？", isDanger: true,
+          onConfirm: async () => {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gold_transactions', id));
+              showToast('已刪除 🗑️');
+              setConfirmModal({ isOpen: false });
+          }
+      });
   };
 
   const handleSaveJar = async (name, target) => {
@@ -693,6 +828,20 @@ export default function CoupleLedgerApp() {
                 onOpenRoulette={() => setShowRoulette(true)}
             />
         )}
+        {activeTab === 'gold' && (
+            <GoldView 
+                transactions={goldTransactions}
+                goldPrice={goldPrice}
+                history={goldHistory}
+                period={goldPeriod}
+                setPeriod={setGoldPeriod}
+                onAdd={() => setShowAddGold(true)}
+                onDelete={handleDeleteGold}
+                loading={goldLoading}
+                error={goldError}
+                onRefresh={fetchGoldPrice}
+            />
+        )}
         {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
       </div>
 
@@ -701,6 +850,7 @@ export default function CoupleLedgerApp() {
           <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
           <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
           <NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
+          <NavBtn icon={Coins} label="黃金" active={activeTab === 'gold'} onClick={() => setActiveTab('gold')} role={role} />
           <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
         </div>
       </div>
@@ -725,6 +875,7 @@ export default function CoupleLedgerApp() {
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
       {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
+      {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} currentPrice={goldPrice} />}
       
       {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
 
@@ -766,6 +917,217 @@ const RoleSelection = ({ onSelect }) => (
     </div>
   </div>
 );
+
+// --- Gold View Component ---
+const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onDelete, loading, error, onRefresh }) => {
+    // Calculations
+    const totalWeight = transactions.reduce((acc, t) => acc + (Number(t.weight) || 0), 0);
+    const totalCost = transactions.reduce((acc, t) => acc + (Number(t.totalCost) || 0), 0);
+    const currentValue = totalWeight * goldPrice;
+    const profit = currentValue - totalCost;
+    const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
+    const avgCost = totalWeight > 0 ? totalCost / totalWeight : 0;
+
+    return (
+        <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+            {/* Header / Main Card */}
+            <div className="bg-gradient-to-br from-yellow-500 to-amber-600 p-6 rounded-3xl shadow-lg text-white relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-20"><Coins size={80} /></div>
+                <div className="relative z-10">
+                    <div className="flex justify-between items-start">
+                        <div className="text-yellow-100 text-xs font-bold uppercase tracking-wider mb-1">持有總市值 (台幣)</div>
+                        <button onClick={onRefresh} disabled={loading} className={`p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors ${loading ? 'animate-spin' : ''}`}>
+                            <RefreshCcw size={14} className="text-white"/>
+                        </button>
+                    </div>
+                    <div className="text-3xl font-black mb-4">{formatMoney(currentValue)}</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+                             <div className="text-yellow-100 text-[10px] mb-1">總重量</div>
+                             <div className="text-lg font-bold flex items-end gap-1">{formatWeight(totalWeight)}</div>
+                        </div>
+                        <div className={`rounded-xl p-3 backdrop-blur-sm ${profit >= 0 ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                             <div className="text-yellow-100 text-[10px] mb-1">預估損益</div>
+                             <div className={`text-lg font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-300' : 'text-red-200'}`}>
+                                {profit >= 0 ? '+' : ''}{formatMoney(profit)}
+                             </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between text-xs font-bold text-yellow-100/80">
+                         <span>購入成本: {formatMoney(totalCost)}</span>
+                         <span className={profit >= 0 ? 'text-green-300' : 'text-red-200'}>ROI: {roi.toFixed(2)}%</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Chart Section */}
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
+                <div className="flex justify-between items-center mb-2">
+                    <div>
+                        <div className="text-xs text-gray-400 font-bold flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                            臺灣銀行本行賣出 (即時)
+                        </div>
+                        <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
+                            {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
+                        </div>
+                    </div>
+                    <div className="flex bg-gray-100 rounded-lg p-1">
+                        {['1m', '3m'].map(p => (
+                            <button 
+                                key={p} 
+                                onClick={() => setPeriod(p)}
+                                className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}
+                            >
+                                {p === '1m' ? '近一月' : '近三月'}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                
+                <GoldChart data={history} period={period} loading={loading} />
+                
+                {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
+                
+                <div className="text-[10px] text-gray-400 mt-3 text-center bg-gray-50 p-2 rounded-lg flex items-center justify-center gap-1">
+                    <TrendingUp size={12}/> 資料來源：臺灣銀行歷史牌價 (非即時連線，可能有延遲)
+                </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+                 <div className="flex-1 bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                     <div className="text-xs text-gray-400 mb-1">平均成本</div>
+                     <div className="text-lg font-bold text-gray-700">{formatMoney(avgCost)}<span className="text-xs font-normal">/g</span></div>
+                 </div>
+                 <button onClick={onAdd} className="flex-1 bg-gray-900 text-white rounded-2xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform">
+                     <Plus size={24} />
+                     <span className="text-sm font-bold">買入黃金</span>
+                 </button>
+            </div>
+
+            {/* Transaction List */}
+            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                    <History size={16} className="text-gray-400"/>
+                    <h3 className="font-bold text-gray-700">交易紀錄</h3>
+                </div>
+                <div className="divide-y divide-gray-100">
+                    {transactions.length === 0 ? (
+                        <div className="p-8 text-center text-gray-400 text-sm">還沒有買過黃金</div>
+                    ) : (
+                        transactions.map(t => (
+                            <div key={t.id} className="p-4 flex items-center justify-between hover:bg-gray-50 group">
+                                <div>
+                                    <div className="font-bold text-gray-800 flex items-center gap-2">
+                                        買入 {formatWeight(t.weight)}
+                                        <span className="text-xs font-normal text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                            @{formatMoney(t.pricePerGram)}
+                                        </span>
+                                    </div>
+                                    <div className="text-xs text-gray-400">{t.date}</div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="text-right">
+                                        <div className="font-bold text-gray-800">{formatMoney(t.totalCost)}</div>
+                                        {/* Simple profit check for this specific transaction */}
+                                        <div className={`text-xs font-bold ${goldPrice >= t.pricePerGram ? 'text-green-500' : 'text-red-400'}`}>
+                                            {goldPrice >= t.pricePerGram ? '+' : ''}
+                                            {((goldPrice - t.pricePerGram) / t.pricePerGram * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                    <button onClick={() => onDelete(t.id)} className="text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity p-2">
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- Add Gold Modal ---
+const AddGoldModal = ({ onClose, onSave, currentPrice }) => {
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [weight, setWeight] = useState('');
+    const [price, setPrice] = useState(currentPrice.toString());
+    const [totalCost, setTotalCost] = useState('');
+    
+    // Auto calculate total cost when weight/price changes
+    useEffect(() => {
+        const w = parseFloat(weight);
+        const p = parseFloat(price);
+        if (!isNaN(w) && !isNaN(p)) {
+            setTotalCost(Math.round(w * p).toString());
+        }
+    }, [weight, price]);
+
+    const handleSubmit = () => {
+        if (!weight || !price || !totalCost) return;
+        onSave({ date, weight, price, totalCost });
+    };
+
+    return (
+        <ModalLayout title="記一筆黃金" onClose={onClose}>
+            <div className="space-y-4 pt-2">
+                <input 
+                   type="date" 
+                   value={date} 
+                   onChange={e => setDate(e.target.value)} 
+                   className="w-full bg-gray-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-yellow-100 outline-none text-center"
+                />
+
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-400 mb-1">重量 (克)</label>
+                        <input 
+                            type="number" 
+                            inputMode="decimal"
+                            value={weight} 
+                            onChange={e => setWeight(e.target.value)} 
+                            placeholder="0.00"
+                            className="w-full bg-gray-50 rounded-xl p-3 text-lg font-black focus:ring-2 focus:ring-yellow-100 outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-400 mb-1">成交單價 (元/克)</label>
+                        <input 
+                            type="number" 
+                            inputMode="decimal"
+                            value={price} 
+                            onChange={e => setPrice(e.target.value)} 
+                            className="w-full bg-gray-50 rounded-xl p-3 text-lg font-black focus:ring-2 focus:ring-yellow-100 outline-none"
+                        />
+                    </div>
+                </div>
+
+                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100 text-center">
+                    <label className="block text-xs font-bold text-yellow-600 mb-1">總成本 (台幣)</label>
+                    <input 
+                         type="number"
+                         value={totalCost}
+                         onChange={e => setTotalCost(e.target.value)}
+                         className="w-full bg-transparent text-3xl font-black text-yellow-700 text-center outline-none"
+                         placeholder="0"
+                    />
+                </div>
+
+                <button 
+                    onClick={handleSubmit} 
+                    disabled={!totalCost || !weight}
+                    className="w-full py-3 bg-yellow-500 text-white rounded-xl font-bold shadow-lg shadow-yellow-200 active:scale-95 transition-transform disabled:opacity-50 disabled:scale-100"
+                >
+                    確認入庫
+                </button>
+            </div>
+        </ModalLayout>
+    );
+};
 
 const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay, readOnly }) => {
   const debt = useMemo(() => {
@@ -943,13 +1305,13 @@ const Statistics = ({ transactions }) => {
                 <div className="p-8 text-center text-gray-400 text-sm">尚無消費紀錄</div>
             ) : (
                 groupedMonthTransactions.map(([date, items]) => {
-                     const daily = items.reduce((acc, t) => {
-                        const { bf, gf } = calculateExpense(t);
-                        return { bf: acc.bf + bf, gf: acc.gf + gf };
-                     }, { bf: 0, gf: 0 });
+                      const daily = items.reduce((acc, t) => {
+                         const { bf, gf } = calculateExpense(t);
+                         return { bf: acc.bf + bf, gf: acc.gf + gf };
+                      }, { bf: 0, gf: 0 });
 
-                     return (
-                         <div key={date}>
+                      return (
+                          <div key={date}>
                              <div className="bg-gray-50/50 px-4 py-2 flex justify-between items-center border-b border-gray-50">
                                 <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">{date.split('-')[1]}/{date.split('-')[2]}</span>
                                 <div className="flex gap-3 text-xs font-bold">
@@ -968,8 +1330,8 @@ const Statistics = ({ transactions }) => {
                                      <div className="font-bold text-gray-700">{formatMoney(t.amount)}</div>
                                  </div>
                              ))}
-                         </div>
-                     );
+                          </div>
+                      );
                 })
             )}
         </div>
@@ -1582,4 +1944,59 @@ const RouletteModal = ({ jars, onClose, onConfirm, role }) => {
           </div>
       </ModalLayout>
   );
+};
+
+const RepaymentModal = ({ debt, onClose, onSave }) => {
+    // Determine payer and receiver
+    const payer = debt > 0 ? 'bf' : 'gf';
+    // debt > 0 means BF lent money (GF owes BF), so GF pays BF. 
+    // Wait, let's re-read the logic:
+    // debt > 0: "男朋友先墊了" -> GF needs to pay BF.
+    // debt < 0: "女朋友先墊了" -> BF needs to pay GF.
+    
+    // In standard accounting here:
+    // If debt > 0 (BF balance is high), GF needs to pay back.
+    // If debt < 0 (GF balance is high), BF needs to pay back.
+    
+    // So if payer is 'gf' (debt > 0), she is paying back.
+    // The transaction should record "Repayment" where paidBy = 'gf', split = custom (bf gets 100% benefit, effectively reducing the debt).
+    // Actually, simply adding a transaction: paidBy=GF, split=shared means BF gets half benefit.
+    // To clear debt completely:
+    // If GF owes 100, GF pays 100 to BF.
+    // In our app logic: 
+    // 'repayment' category is special. It doesn't count as expense.
+    // We just need to record who paid whom.
+    
+    const displayAmount = Math.abs(debt);
+    
+    const handleConfirm = () => {
+        onSave({
+            amount: displayAmount,
+            category: 'repayment',
+            note: '結清欠款',
+            date: new Date().toISOString().split('T')[0],
+            paidBy: payer === 'bf' ? 'gf' : 'bf', // Who is paying the cash now?
+            // If debt > 0 (BF lent), GF pays now. So paidBy = 'gf'.
+            splitType: 'shared' // irrelevant for repayment logic but required by schema
+        });
+        onClose();
+    };
+
+    return (
+        <ModalLayout title="結清款項" onClose={onClose}>
+            <div className="text-center space-y-4 py-4">
+                <div className="text-gray-500 text-sm">
+                    {debt > 0 ? '👧 女朋友' : '👦 男朋友'} 需要支付給
+                    <br/>
+                    <span className="font-bold text-gray-800 text-lg">{debt > 0 ? '男朋友 👦' : '女朋友 👧'}</span>
+                </div>
+                <div className="text-4xl font-black text-gray-800">{formatMoney(displayAmount)}</div>
+                <p className="text-xs text-gray-400">確認對方已收到款項後再點擊結清</p>
+                <button onClick={handleConfirm} className="w-full py-3 bg-green-500 text-white rounded-xl font-bold shadow-lg shadow-green-200 active:scale-95 transition-transform">
+                    <CheckCircle className="inline mr-2" size={18}/>
+                    確認已還款
+                </button>
+            </div>
+        </ModalLayout>
+    );
 };
