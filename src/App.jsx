@@ -330,9 +330,9 @@ const GoldChart = ({ data, intraday, period, loading }) => {
         }
         // 否則使用歷史日線資料
         if (!data || data.length === 0) return [];
-        if (period === '5d') return data.slice(-5);
+        if (period === '10d') return data.slice(-10); // 這裡改為取最後 10 筆
         if (period === '3m') return data.slice(-90); 
-        return data.slice(-10);
+        return data.slice(-10); // Default fallback
     }, [data, intraday, period]);
 
     if (!chartData || chartData.length === 0) {
@@ -690,9 +690,9 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
                     </div>
                     
                     <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
-                        {['1d', '5d', '3m'].map(p => (
+                        {['1d', '10d', '3m'].map(p => (
                             <button key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
-                                {p === '1d' ? '即時' : (p === '5d' ? '近五日' : '近三月')}
+                                {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
                             </button>
                         ))}
                     </div>
@@ -766,11 +766,13 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
     );
 };
 
+// --- Add Gold Modal (New) ---
 const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
     const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
     const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'kg'
-    const [weightInput, setWeightInput] = useState(initialData ? (initialData.weight).toString() : '');
-    const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() || '');
+    // 修正白畫面：使用 Optional Chaining (?.) 與 Nullish Coalescing (??) 確保初始值安全
+    const [weightInput, setWeightInput] = useState(initialData?.weight?.toString() ?? '');
+    const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() ?? '');
     const [channel, setChannel] = useState(initialData?.channel || '');
     const [note, setNote] = useState(initialData?.note || '');
     const [photo, setPhoto] = useState(initialData?.photo || null);
@@ -809,6 +811,7 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
     return (
         <ModalLayout title={initialData ? "編輯黃金" : "記一筆黃金"} onClose={onClose}>
             <div className="space-y-4 pt-2">
+                {/* Date & Owner */}
                 <div className="flex gap-2">
                     <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 rounded-xl px-3 py-2 text-sm font-bold outline-none" />
                     <div className="flex bg-gray-100 rounded-lg p-1 flex-1">
@@ -816,6 +819,8 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
                         <button onClick={() => setOwner('gf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'gf' ? 'bg-pink-500 text-white' : 'text-gray-500'}`}>女友</button>
                     </div>
                 </div>
+
+                {/* Weight Input with Unit Toggle */}
                 <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
                     <div className="flex justify-between mb-2">
                         <label className="text-xs font-bold text-gray-400">重量</label>
@@ -830,10 +835,14 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
                         <span className="mb-2 text-sm font-bold text-gray-400">{unit === 'tw_qian' ? '錢' : (unit === 'g' ? '克' : '公斤')}</span>
                     </div>
                 </div>
+
+                {/* Cost Input */}
                 <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
                     <label className="text-xs font-bold text-gray-400 block mb-1">購買總金額 (台幣)</label>
                     <input type="number" value={totalCost} onChange={e => setTotalCost(e.target.value)} placeholder="0" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
                 </div>
+
+                {/* Details */}
                 <div className="grid grid-cols-2 gap-2">
                     <div className="bg-gray-50 p-2 rounded-xl">
                         <label className="text-[10px] text-gray-400 block mb-1">購買管道</label>
@@ -844,6 +853,8 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
                         <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="例: 生日禮物" className="bg-transparent w-full text-sm font-bold outline-none" />
                     </div>
                 </div>
+
+                {/* Photo Upload */}
                 <label className="block w-full h-24 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 relative overflow-hidden">
                     {photo ? (
                         <>
@@ -858,6 +869,7 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
                     )}
                     <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
                 </label>
+
                 <button onClick={handleSubmit} disabled={!weightInput || !totalCost} className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform">
                     {initialData ? '儲存變更' : '確認入庫'}
                 </button>
@@ -931,77 +943,6 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   );
 };
 
-const AddJarModal = ({ onClose, onSave, initialData }) => {
-  const [name, setName] = useState(initialData?.name || '');
-  const [target, setTarget] = useState(initialData?.targetAmount?.toString() || '');
-  return (
-    <ModalLayout title={initialData ? "編輯存錢罐" : "新存錢罐"} onClose={onClose}>
-      <div className="space-y-4">
-        <div className="bg-gray-50 p-3 rounded-2xl"><label className="block mb-1 text-xs font-bold text-gray-400">目標金額</label><div className="text-2xl font-black text-gray-800 tracking-wider h-8 flex items-center overflow-hidden">{target ? target : <span className="text-gray-300">0</span>}</div></div>
-        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="名稱 (例如: 旅遊基金)" className="w-full bg-gray-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none" />
-        <CalculatorKeypad value={target} onChange={setTarget} onConfirm={(val) => { if (name && val) onSave(name, val); }} compact={true} />
-      </div>
-    </ModalLayout>
-  );
-};
-
-const DepositModal = ({ jar, onClose, onConfirm, role }) => {
-  const [amount, setAmount] = useState('');
-  const [depositor, setDepositor] = useState(role);
-  if (!jar) return null;
-  return (
-    <ModalLayout title={`存入: ${jar.name}`} onClose={onClose}>
-      <div className="space-y-4">
-        <div className="text-center"><div className="text-gray-400 text-xs mb-1">目前進度</div><div className="font-bold text-xl text-gray-800">{formatMoney(jar.currentAmount)} <span className="text-gray-300 text-sm">/ {formatMoney(jar.targetAmount)}</span></div></div>
-        <div className="bg-gray-50 p-2 rounded-xl"><div className="text-[10px] text-gray-400 text-center mb-1">是誰存的?</div><div className="flex bg-white rounded-lg p-1 shadow-sm"><button onClick={() => setDepositor('bf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button><button onClick={() => setDepositor('gf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button></div></div>
-        <div className="bg-gray-50 p-3 rounded-2xl text-center"><div className="text-xs text-gray-400 mb-1">存入金額</div><div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center text-green-500 overflow-hidden">{amount ? `+${amount}` : <span className="text-gray-300">0</span>}</div></div>
-        <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(val) => { if(Number(val) > 0) onConfirm(jar.id, val, depositor); }} compact={true} />
-      </div>
-    </ModalLayout>
-  );
-};
-
-const JarHistoryModal = ({ jar, onClose, onUpdateItem, onDeleteItem }) => {
-  const [editingItem, setEditingItem] = useState(null);
-  const [editAmount, setEditAmount] = useState('');
-  const history = [...(jar.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
-  return (
-    <ModalLayout title={`${jar.name} - 存錢紀錄`} onClose={onClose}>
-        {editingItem ? (<div className="space-y-4 animate-[fadeIn_0.2s]"><button onClick={() => setEditingItem(null)} className="flex items-center gap-1 text-gray-500 text-xs font-bold mb-2"><ArrowLeft size={14}/> 返回列表</button><div className="bg-gray-50 p-3 rounded-2xl text-center"><div className="text-xs text-gray-400 mb-1">修改金額</div><div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">{editAmount}</div></div><CalculatorKeypad value={editAmount} onChange={setEditAmount} onConfirm={(val) => { if(Number(val) >= 0) { onUpdateItem(jar, editingItem, val); setEditingItem(null); } }} compact={true} /></div>) : (<div className="space-y-2">{history.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">尚無詳細紀錄</div> : history.map((item, idx) => (<div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl"><div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${item.role === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>{item.role === 'bf' ? '👦' : '👧'}</div><div><div className="text-xs text-gray-400">{new Date(item.date).toLocaleDateString()}</div><div className="font-bold text-gray-800">{formatMoney(item.amount)}</div></div></div><div className="flex gap-2"><button onClick={() => { setEditingItem(item); setEditAmount(item.amount.toString()); }} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-blue-500"><Pencil size={16}/></button><button onClick={() => onDeleteItem(jar, item)} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-red-500"><Trash2 size={16}/></button></div></div>))}</div>)}
-    </ModalLayout>
-  );
-};
-
-const RouletteModal = ({ jars, onClose, onConfirm, role }) => {
-  const [spinning, setSpinning] = useState(false);
-  const [result, setResult] = useState(null); 
-  const [displayNum, setDisplayNum] = useState(1);
-  const [selectedJarId, setSelectedJarId] = useState('');
-  const [depositor, setDepositor] = useState(role);
-  const intervalRef = useRef(null);
-  useEffect(() => { if (jars.length > 0 && !selectedJarId) { setSelectedJarId(jars[0].id); } }, [jars, selectedJarId]);
-  const spin = () => { setSpinning(true); setResult(null); intervalRef.current = setInterval(() => { setDisplayNum(Math.floor(Math.random() * 99) + 1); }, 50); setTimeout(() => { if (intervalRef.current) clearInterval(intervalRef.current); const final = Math.floor(Math.random() * 99) + 1; setDisplayNum(final); setResult(final); setSpinning(false); }, 1500); };
-  const handleDeposit = () => { if(result && selectedJarId) { let finalAmount = result; if (depositor === 'both') { finalAmount = result * 2; } onConfirm(selectedJarId, finalAmount.toString(), depositor); onClose(); } };
-  return (
-      <ModalLayout title="🎲 命運轉盤 (1~99元)" onClose={onClose}>
-          <div className="flex flex-col items-center gap-6 py-4">
-              <div className="relative w-48 h-48 rounded-full border-8 border-purple-100 flex items-center justify-center shadow-inner bg-white"><div className="absolute inset-0 rounded-full border-4 border-dashed border-purple-200 animate-spin-slow" style={{ animationDuration: spinning ? '2s' : '10s' }}></div><div className="text-center z-10"><div className="text-xs font-bold text-gray-400 mb-1">{spinning ? '轉動中...' : (result ? '恭喜選中!' : '試試手氣')}</div><div className={`text-6xl font-black tracking-tight transition-colors ${spinning ? 'text-gray-300 scale-90 blur-[1px]' : 'text-purple-600 scale-100'}`}>{displayNum}</div><div className="text-sm font-bold text-purple-300 mt-1">NT$</div></div></div>
-              {!result ? (<button onClick={spin} disabled={spinning} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 text-lg flex items-center justify-center gap-2">{spinning ? <Loader2 className="animate-spin" /> : <Dices />}{spinning ? '命運轉動中...' : '開始轉動！'}</button>) : (<div className="w-full space-y-4 animate-[fadeIn_0.3s]"><div className="bg-gray-50 p-4 rounded-2xl space-y-3"><div className="flex justify-between items-center text-sm font-bold text-gray-600 border-b border-gray-200 pb-2"><span>存入金額</span><div className="text-right"><span className="text-purple-600 text-lg block">{formatMoney(depositor === 'both' ? result * 2 : result)}</span>{depositor === 'both' && <span className="text-[10px] text-gray-400 block">({result} x 2人)</span>}</div></div><div><div className="text-[10px] text-gray-400 mb-1">誰要存?</div><div className="flex bg-white rounded-lg p-1 shadow-sm"><button onClick={() => setDepositor('bf')} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button><button onClick={() => setDepositor('gf')} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button><button onClick={() => setDepositor('both')} className={`flex-[1.2] py-1.5 rounded-md text-xs font-bold flex items-center justify-center gap-1 ${depositor === 'both' ? 'bg-purple-100 text-purple-600' : 'text-gray-400'}`}><Users size={12}/> 一起 (+100%)</button></div></div><div><div className="text-[10px] text-gray-400 mb-1">存到哪?</div><select value={selectedJarId} onChange={(e) => setSelectedJarId(e.target.value)} className="w-full bg-white p-3 rounded-lg text-sm font-bold border-none outline-none text-gray-700 shadow-sm">{jars.map(j => (<option key={j.id} value={j.id}>{j.name}</option>))}</select></div></div><div className="flex gap-2"><button onClick={spin} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm">重轉一次</button><button onClick={handleDeposit} className="flex-[2] py-3 bg-gray-900 text-white rounded-xl font-bold text-sm shadow-lg">確認存入</button></div></div>)}
-          </div>
-      </ModalLayout>
-  );
-};
-
-const RepaymentModal = ({ debt, onClose, onSave }) => {
-    const displayAmount = Math.abs(debt);
-    const handleConfirm = () => { onSave({ amount: displayAmount, category: 'repayment', note: '結清欠款', date: new Date().toISOString().split('T')[0], paidBy: debt > 0 ? 'gf' : 'bf', splitType: 'shared' }); onClose(); };
-    return (
-        <ModalLayout title="結清款項" onClose={onClose}>
-            <div className="text-center space-y-4 py-4"><div className="text-gray-500 text-sm">{debt > 0 ? '👧 女朋友' : '👦 男朋友'} 需要支付給<br/><span className="font-bold text-gray-800 text-lg">{debt > 0 ? '男朋友 👦' : '女朋友 👧'}</span></div><div className="text-4xl font-black text-gray-800">{formatMoney(displayAmount)}</div><p className="text-xs text-gray-400">確認對方已收到款項後再點擊結清</p><button onClick={handleConfirm} className="w-full py-3 bg-green-500 text-white rounded-xl font-bold shadow-lg shadow-green-200 active:scale-95 transition-transform"><CheckCircle className="inline mr-2" size={18}/>確認已還款</button></div>
-        </ModalLayout>
-    );
-};
-
 // --- Main App Component ---
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -1039,7 +980,8 @@ export default function App() {
   const [goldPrice, setGoldPrice] = useState(0); 
   const [goldHistory, setGoldHistory] = useState([]);
   const [goldIntraday, setGoldIntraday] = useState([]); 
-  const [goldPeriod, setGoldPeriod] = useState('1d'); // 1d, 5d, 3m
+  // 修正預設為 '10d' (近十日)，讓使用者能看到更明確的趨勢
+  const [goldPeriod, setGoldPeriod] = useState('10d'); 
   const [goldLoading, setGoldLoading] = useState(false);
   const [goldError, setGoldError] = useState(null);
 
