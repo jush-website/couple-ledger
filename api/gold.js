@@ -1,37 +1,45 @@
 // 這是運行在 Vercel 伺服器端的程式碼 (Node.js)
-// 它可以繞過瀏覽器的 CORS 限制去抓取台灣銀行的資料
-
 export default async function handler(req, res) {
   try {
-    // 台灣銀行黃金存摺歷史價格 CSV 下載連結
-    // 網址: https://rate.bot.com.tw/gold/csv/0 (0 代表本月/最近資料)
     const targetUrl = 'https://rate.bot.com.tw/gold/csv/0';
 
-    const response = await fetch(targetUrl);
+    // 🔥 關鍵修正：加入 Headers 偽裝成瀏覽器，避免被台銀擋下 (403 Forbidden)
+    const response = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+      }
+    });
     
     if (!response.ok) {
-      throw new Error('Failed to fetch data from Bank of Taiwan');
+      throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
     }
 
     const csvText = await response.text();
     
-    // 解析 CSV (簡單處理)
-    // 台銀 CSV 格式通常是: 日期(0), 幣別(1), 買進(2), 賣出(3)...
-    // 我們需要的是 "本行賣出" (因為這是我們買黃金的價格)
-    
+    // 解析 CSV
+    // 使用 trim() 去除每一行的前後空白
     const rows = csvText.split('\n').filter(row => row.trim() !== '');
-    // 移除第一行標題
-    const dataRows = rows.slice(1);
+    const dataRows = rows.slice(1); // 移除標題
 
     const history = dataRows.map(row => {
       const columns = row.split(',');
-      // 日期格式通常是 YYYYMMDD
-      const dateStr = columns[0]; 
-      // 賣出價在第 4 欄 (索引 3)，有時候台銀格式會微調，通常賣出價比較高
-      // columns[2] 是買進 (銀行跟你買), columns[3] 是賣出 (銀行賣給你)
+      // 確保欄位足夠，避免錯誤
+      if (columns.length < 4) return null;
+
+      // 處理日期：有時候會有隱藏的 BOM 字元，使用 trim() 清理
+      const dateStr = columns[0].trim(); 
+      // 賣出價通常在 columns[3] (本行賣出)
       const price = parseFloat(columns[3]); 
       
+      if (!dateStr || isNaN(price)) return null;
+
       // 格式化日期 YYYYMMDD -> YYYY-MM-DD
+      // 確保字串長度足夠才切割
+      if (dateStr.length < 8) return null;
+
       const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
 
       return {
@@ -39,15 +47,22 @@ export default async function handler(req, res) {
         price: price,
         label: `${dateStr.substring(4, 6)}/${dateStr.substring(6, 8)}`
       };
-    }).filter(item => !isNaN(item.price)); // 過濾掉無效數據
+    }).filter(item => item !== null);
 
-    // 反轉陣列，讓最新的在最後面 (符合圖表由左至右的時間軸)
+    // 確保有資料
+    if (history.length === 0) {
+        console.warn('Parsed gold data is empty');
+        // 如果抓不到資料，回傳一個安全值，避免前端壞掉
+        return res.status(200).json({
+            success: true,
+            currentPrice: 2880, 
+            history: [] 
+        });
+    }
+
     const sortedHistory = history.reverse();
-    
-    // 取得最新價格 (最後一筆)
     const currentPrice = sortedHistory.length > 0 ? sortedHistory[sortedHistory.length - 1].price : 2880;
 
-    // 回傳 JSON 給前端
     res.status(200).json({
       success: true,
       currentPrice,
@@ -56,11 +71,11 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Gold API Error:', error);
-    // 發生錯誤時回傳假資料或錯誤訊息，避免前端壞掉
     res.status(500).json({ 
       success: false, 
       error: error.message,
-      currentPrice: 2880, // Fallback
+      // 回傳一個安全值以免前端完全壞掉
+      currentPrice: 2880, 
       history: []
     });
   }
