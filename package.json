@@ -29,8 +29,4 @@
   "overrides": {
     "vite": "npm:rolldown-vite@7.2.5"
   }
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
 }
