@@ -14,7 +14,7 @@ import {
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
   Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users,
-  Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag
+  Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -107,9 +107,14 @@ const safeCalculate = (expression) => {
   try {
     const sanitized = (expression || '').toString().replace(/[^0-9+\-*/.]/g, '');
     if (!sanitized) return '';
+    
+    // Manual parser to avoid eval()
     const parts = sanitized.split(/([+\-*/])/).filter(p => p.trim() !== '');
     if (parts.length === 0) return '';
+    
     let tokens = [...parts];
+    
+    // First pass: Multiplication and Division
     for (let i = 1; i < tokens.length - 1; i += 2) {
       if (tokens[i] === '*' || tokens[i] === '/') {
         const prev = parseFloat(tokens[i-1]);
@@ -122,6 +127,8 @@ const safeCalculate = (expression) => {
         i -= 2;
       }
     }
+    
+    // Second pass: Addition and Subtraction
     let result = parseFloat(tokens[0]);
     for (let i = 1; i < tokens.length; i += 2) {
       const op = tokens[i];
@@ -129,6 +136,7 @@ const safeCalculate = (expression) => {
       if (op === '+') result += next;
       if (op === '-') result -= next;
     }
+    
     return isNaN(result) || !isFinite(result) ? '' : result.toString();
   } catch (e) {
     return '';
@@ -208,7 +216,7 @@ const CATEGORIES = [
   { id: 'other', name: '其他', color: '#999' },
 ];
 
-// --- Sub-Components (Defined BEFORE App) ---
+// --- COMPONENTS ---
 
 const AppLoading = () => (
   <div style={{
@@ -317,6 +325,7 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
+// --- Gold Chart Component ---
 const GoldChart = ({ data, intraday, period, loading }) => {
     if (loading) {
         return <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs"><Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...</div>;
@@ -330,9 +339,9 @@ const GoldChart = ({ data, intraday, period, loading }) => {
         }
         // 否則使用歷史日線資料
         if (!data || data.length === 0) return [];
-        if (period === '10d') return data.slice(-10); // 這裡改為取最後 10 筆
+        if (period === '10d') return data.slice(-10); // 取最後 10 筆
         if (period === '3m') return data.slice(-90); 
-        return data.slice(-10); // Default fallback
+        return data.slice(-10);
     }, [data, intraday, period]);
 
     if (!chartData || chartData.length === 0) {
@@ -377,7 +386,7 @@ const GoldChart = ({ data, intraday, period, loading }) => {
 };
 
 const NavBtn = ({ icon: Icon, label, active, onClick, role }) => (
-  <button onClick={onClick} className={`flex flex-col items-center gap-1 w-full ${active ? (role === 'bf' ? 'text-blue-600' : 'text-pink-600') : 'text-gray-400'}`}>
+  <button type="button" onClick={onClick} className={`flex flex-col items-center gap-1 w-full ${active ? (role === 'bf' ? 'text-blue-600' : 'text-pink-600') : 'text-gray-400'}`}>
     <Icon size={24} strokeWidth={active ? 2.5 : 2} />
     <span className="text-[10px] font-medium">{label}</span>
   </button>
@@ -395,6 +404,329 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
+// --- Gold View Component (Enhanced) ---
+const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
+    // Filter transactions by current user
+    const myTransactions = transactions.filter(t => t.owner === role);
+    
+    // Calculations based on "My" gold
+    const totalWeightGrams = myTransactions.reduce((acc, t) => acc + (Number(t.weight) || 0), 0);
+    const totalCost = myTransactions.reduce((acc, t) => acc + (Number(t.totalCost) || 0), 0);
+    const currentValue = totalWeightGrams * goldPrice;
+    const profit = currentValue - totalCost;
+    const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
+
+    return (
+        <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+            {/* Header / Main Card */}
+            <div className={`p-6 rounded-3xl shadow-lg text-white relative overflow-hidden ${role === 'bf' ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-gradient-to-br from-pink-500 to-rose-600'}`}>
+                <div className="absolute top-0 right-0 p-4 opacity-20"><Coins size={80} /></div>
+                <div className="relative z-10">
+                    <div className="flex justify-between items-start">
+                        <div className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
+                            {role === 'bf' ? '👦 男朋友' : '👧 女朋友'} 的黃金總值 (台幣)
+                        </div>
+                        <button type="button" onClick={onRefresh} disabled={loading} className={`p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors ${loading ? 'animate-spin' : ''}`}>
+                            <RefreshCcw size={14} className="text-white"/>
+                        </button>
+                    </div>
+                    <div className="text-3xl font-black mb-4">{formatMoney(currentValue)}</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+                             <div className="text-white/70 text-[10px] mb-1">持有重量 (台錢)</div>
+                             <div className="text-lg font-bold flex items-end gap-1">
+                                {formatWeight(totalWeightGrams, 'tw_qian')}
+                                <span className="text-[10px] font-normal opacity-70">({formatWeight(totalWeightGrams)})</span>
+                             </div>
+                        </div>
+                        <div className={`rounded-xl p-3 backdrop-blur-sm ${profit >= 0 ? 'bg-green-400/30' : 'bg-red-400/30'}`}>
+                             <div className="text-white/70 text-[10px] mb-1">預估損益</div>
+                             <div className={`text-lg font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-100' : 'text-red-100'}`}>
+                                {profit >= 0 ? '+' : ''}{formatMoney(profit)}
+                             </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between text-xs font-bold text-white/70">
+                         <span>購入成本: {formatMoney(totalCost)}</span>
+                         <span className={profit >= 0 ? 'text-green-100' : 'text-red-100'}>ROI: {roi.toFixed(2)}%</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Chart Section - UPDATED with multiple units */}
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <div className="text-xs text-gray-400 font-bold flex items-center gap-1 mb-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                            台銀賣出金價
+                        </div>
+                        <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
+                            {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
+                        </div>
+                        
+                        {/* 新增：多單位價格顯示 */}
+                        <div className="flex flex-wrap gap-2 mt-2">
+                            <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-100 px-2 py-1 rounded-lg">
+                                <Scale size={10} className="text-yellow-600"/>
+                                <span className="text-[10px] font-bold text-yellow-700">
+                                    {formatMoney(goldPrice * 3.75)} /台錢
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
+                                <span className="text-[10px] font-bold text-gray-600">
+                                    {formatMoney(goldPrice * 1000)} /公斤
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
+                        {['1d', '10d', '3m'].map(p => (
+                            <button type="button" key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
+                                {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                
+                <GoldChart data={history} intraday={intraday} period={period} loading={loading} />
+                {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
+            </div>
+
+            {/* Action Button */}
+            <button type="button" onClick={onAdd} className="w-full bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                <Plus size={20} />
+                <span className="font-bold">記一筆黃金</span>
+            </button>
+
+            {/* Transaction List */}
+            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                    <History size={16} className="text-gray-400"/>
+                    <h3 className="font-bold text-gray-700">{role === 'bf' ? '男友' : '女友'}的黃金存摺</h3>
+                </div>
+                <div className="divide-y divide-gray-100">
+                    {myTransactions.length === 0 ? (
+                        <div className="p-8 text-center text-gray-400 text-sm">還沒有黃金紀錄</div>
+                    ) : (
+                        myTransactions.map(t => {
+                            const itemValue = (Number(t.weight) || 0) * goldPrice;
+                            const itemProfit = itemValue - Number(t.totalCost);
+                            const itemRoi = t.totalCost > 0 ? (itemProfit / t.totalCost) * 100 : 0;
+
+                            return (
+                                <div key={t.id} onClick={() => onEdit(t)} className="p-4 flex items-start justify-between hover:bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer">
+                                    <div className="flex gap-3">
+                                        {t.photo ? (
+                                            <img src={t.photo} alt="receipt" className="w-12 h-12 rounded-xl object-cover border border-gray-200" />
+                                        ) : (
+                                            <div className="w-12 h-12 rounded-xl bg-yellow-100 text-yellow-600 flex items-center justify-center">
+                                                <Tag size={20} />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <div className="font-bold text-gray-800 flex items-center gap-2">
+                                                {formatWeight(t.weight, 'tw_qian')}
+                                                {t.note && <span className="text-xs font-normal text-gray-400">({t.note})</span>}
+                                            </div>
+                                            <div className="text-xs text-gray-400 flex gap-2 mt-0.5">
+                                                <span>{t.date}</span>
+                                                {t.channel && <span>• {t.channel}</span>}
+                                            </div>
+                                            <div className="text-[10px] text-gray-400 mt-1">成本 {formatMoney(t.totalCost)}</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className={`font-bold text-sm ${itemProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                            {itemProfit >= 0 ? '+' : ''}{formatMoney(itemProfit)}
+                                        </div>
+                                        <div className={`text-[10px] font-bold ${itemProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            {itemRoi.toFixed(1)}%
+                                        </div>
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="mt-2 text-gray-300 hover:text-red-400 p-1">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- Add Gold Modal (New & Fixed) ---
+const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
+    const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
+    const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'kg'
+    // 確保初始值是字串，避免 undefined
+    const [weightInput, setWeightInput] = useState(initialData?.weight ? (initialData.weight / (unit==='tw_qian'?3.75:1)).toString() : '');
+    const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() ?? '');
+    const [channel, setChannel] = useState(initialData?.channel || '');
+    const [note, setNote] = useState(initialData?.note || '');
+    const [photo, setPhoto] = useState(initialData?.photo || null);
+    const [owner, setOwner] = useState(initialData?.owner || role);
+    const [error, setError] = useState('');
+
+    const handlePhoto = async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            try {
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    const compressed = await compressImage(reader.result);
+                    setPhoto(compressed);
+                };
+                reader.readAsDataURL(file);
+            } catch(e) {
+                setError('照片處理失敗');
+            }
+        }
+    };
+
+    const handleSubmit = () => {
+        if (!weightInput || !totalCost) {
+            setError('請輸入重量與金額');
+            return;
+        }
+        
+        const weightNum = parseFloat(weightInput);
+        const costNum = parseFloat(totalCost);
+
+        if (isNaN(weightNum) || weightNum <= 0) {
+            setError('重量格式錯誤');
+            return;
+        }
+        if (isNaN(costNum) || costNum < 0) {
+            setError('金額格式錯誤');
+            return;
+        }
+
+        let weightInGrams = weightNum;
+        if (unit === 'tw_qian') weightInGrams = weightInGrams * 3.75;
+        if (unit === 'kg') weightInGrams = weightInGrams * 1000;
+
+        onSave({
+            date,
+            weight: weightInGrams,
+            totalCost: costNum,
+            channel,
+            note,
+            photo,
+            owner
+        });
+    };
+
+    return (
+        <ModalLayout title={initialData ? "編輯黃金" : "記一筆黃金"} onClose={onClose}>
+            <div className="space-y-4 pt-2">
+                {error && (
+                    <div className="bg-red-50 text-red-500 p-3 rounded-xl text-sm font-bold flex items-center gap-2">
+                        <AlertCircle size={16}/> {error}
+                    </div>
+                )}
+
+                {/* Date & Owner */}
+                <div className="flex gap-2">
+                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 rounded-xl px-3 py-2 text-sm font-bold outline-none border-2 border-transparent focus:border-blue-200" />
+                    <div className="flex bg-gray-100 rounded-xl p-1 flex-1">
+                        <button type="button" onClick={() => setOwner('bf')} className={`flex-1 rounded-lg text-xs font-bold transition-all ${owner === 'bf' ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}>男友</button>
+                        <button type="button" onClick={() => setOwner('gf')} className={`flex-1 rounded-lg text-xs font-bold transition-all ${owner === 'gf' ? 'bg-pink-500 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}>女友</button>
+                    </div>
+                </div>
+
+                {/* Weight Input with Unit Toggle */}
+                <div className="bg-gray-50 p-4 rounded-2xl border-2 border-transparent focus-within:border-yellow-200 transition-colors">
+                    <div className="flex justify-between mb-2">
+                        <label className="text-xs font-bold text-gray-400">重量</label>
+                        <div className="flex bg-white rounded-lg p-0.5 shadow-sm">
+                            {[{id:'tw_qian', label:'台錢'}, {id:'g', label:'公克'}, {id:'kg', label:'公斤'}].map(u => (
+                                <button 
+                                    type="button"
+                                    key={u.id} 
+                                    onClick={()=>setUnit(u.id)} 
+                                    className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${unit===u.id ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:bg-gray-50'}`}
+                                >
+                                    {u.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                        <input 
+                            type="number" 
+                            inputMode="decimal"
+                            value={weightInput} 
+                            onChange={e => setWeightInput(e.target.value)} 
+                            placeholder="0.00" 
+                            className="bg-transparent text-4xl font-black text-gray-800 w-full outline-none" 
+                        />
+                        <span className="text-sm font-bold text-gray-400 mb-1">
+                            {unit === 'tw_qian' ? '錢' : (unit === 'g' ? '克' : '公斤')}
+                        </span>
+                    </div>
+                </div>
+
+                {/* Cost Input */}
+                <div className="bg-gray-50 p-4 rounded-2xl border-2 border-transparent focus-within:border-green-200 transition-colors">
+                    <label className="text-xs font-bold text-gray-400 block mb-1">購買總金額 (台幣)</label>
+                    <div className="flex items-center gap-1">
+                        <span className="text-gray-400 text-lg font-bold">$</span>
+                        <input 
+                            type="number" 
+                            inputMode="numeric"
+                            value={totalCost} 
+                            onChange={e => setTotalCost(e.target.value)} 
+                            placeholder="0" 
+                            className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" 
+                        />
+                    </div>
+                </div>
+
+                {/* Details */}
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-gray-50 p-3 rounded-2xl">
+                        <label className="text-[10px] text-gray-400 block mb-1 font-bold">購買管道</label>
+                        <input type="text" value={channel} onChange={e => setChannel(e.target.value)} placeholder="例: 銀樓" className="bg-transparent w-full text-sm font-bold outline-none" />
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-2xl">
+                        <label className="text-[10px] text-gray-400 block mb-1 font-bold">備註</label>
+                        <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="例: 生日禮物" className="bg-transparent w-full text-sm font-bold outline-none" />
+                    </div>
+                </div>
+
+                {/* Photo Upload */}
+                <label className="block w-full h-24 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 hover:border-gray-400 transition-all relative overflow-hidden group">
+                    {photo ? (
+                        <>
+                            <img src={photo} className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity" />
+                            <div className="relative z-10 bg-black/70 text-white px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-2">
+                                <RefreshCw size={12}/> 更換照片
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <Camera size={24} className="mb-1 text-gray-300 group-hover:text-gray-500 transition-colors"/>
+                            <span className="text-xs font-bold">上傳證明/照片</span>
+                        </>
+                    )}
+                    <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+                </label>
+
+                <button type="button" onClick={handleSubmit} disabled={!weightInput || !totalCost} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg disabled:opacity-50 disabled:shadow-none active:scale-95 transition-all text-lg">
+                    {initialData ? '儲存變更' : '確認入庫'}
+                </button>
+            </div>
+        </ModalLayout>
+    );
+};
+
+// ... (Overview, Statistics, Savings, ModalLayout, BookManagerModal, ReceiptScannerModal, AddTransactionModal, AddJarModal, DepositModal, JarHistoryModal, RouletteModal, RepaymentModal, App) ...
 const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay, readOnly }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
@@ -611,272 +943,17 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
   </div>
 );
 
-const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
-    // Filter transactions by current user
-    const myTransactions = transactions.filter(t => t.owner === role);
-    
-    // Calculations based on "My" gold
-    const totalWeightGrams = myTransactions.reduce((acc, t) => acc + (Number(t.weight) || 0), 0);
-    const totalCost = myTransactions.reduce((acc, t) => acc + (Number(t.totalCost) || 0), 0);
-    const currentValue = totalWeightGrams * goldPrice;
-    const profit = currentValue - totalCost;
-    const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
-
-    return (
-        <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
-            {/* Header / Main Card */}
-            <div className={`p-6 rounded-3xl shadow-lg text-white relative overflow-hidden ${role === 'bf' ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-gradient-to-br from-pink-500 to-rose-600'}`}>
-                <div className="absolute top-0 right-0 p-4 opacity-20"><Coins size={80} /></div>
-                <div className="relative z-10">
-                    <div className="flex justify-between items-start">
-                        <div className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                            {role === 'bf' ? '👦 男朋友' : '👧 女朋友'} 的黃金總值 (台幣)
-                        </div>
-                        <button onClick={onRefresh} disabled={loading} className={`p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors ${loading ? 'animate-spin' : ''}`}>
-                            <RefreshCcw size={14} className="text-white"/>
-                        </button>
-                    </div>
-                    <div className="text-3xl font-black mb-4">{formatMoney(currentValue)}</div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
-                             <div className="text-white/70 text-[10px] mb-1">持有重量 (台錢)</div>
-                             <div className="text-lg font-bold flex items-end gap-1">
-                                {formatWeight(totalWeightGrams, 'tw_qian')}
-                                <span className="text-[10px] font-normal opacity-70">({formatWeight(totalWeightGrams)})</span>
-                             </div>
-                        </div>
-                        <div className={`rounded-xl p-3 backdrop-blur-sm ${profit >= 0 ? 'bg-green-400/30' : 'bg-red-400/30'}`}>
-                             <div className="text-white/70 text-[10px] mb-1">預估損益</div>
-                             <div className={`text-lg font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-100' : 'text-red-100'}`}>
-                                {profit >= 0 ? '+' : ''}{formatMoney(profit)}
-                             </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between text-xs font-bold text-white/70">
-                         <span>購入成本: {formatMoney(totalCost)}</span>
-                         <span className={profit >= 0 ? 'text-green-100' : 'text-red-100'}>ROI: {roi.toFixed(2)}%</span>
-                    </div>
-                </div>
-            </div>
-
-            {/* Chart Section - UPDATED with multiple units */}
-            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-                <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <div className="text-xs text-gray-400 font-bold flex items-center gap-1 mb-1">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                            台銀賣出金價
-                        </div>
-                        <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
-                            {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
-                        </div>
-                        
-                        {/* 新增：多單位價格顯示 */}
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-100 px-2 py-1 rounded-lg">
-                                <Scale size={10} className="text-yellow-600"/>
-                                <span className="text-[10px] font-bold text-yellow-700">
-                                    {formatMoney(goldPrice * 3.75)} /台錢
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
-                                <span className="text-[10px] font-bold text-gray-600">
-                                    {formatMoney(goldPrice * 1000)} /公斤
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
-                        {['1d', '10d', '3m'].map(p => (
-                            <button key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
-                                {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                
-                <GoldChart data={history} intraday={intraday} period={period} loading={loading} />
-                {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
-            </div>
-
-            {/* Action Button */}
-            <button onClick={onAdd} className="w-full bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                <Plus size={20} />
-                <span className="font-bold">記一筆黃金</span>
-            </button>
-
-            {/* Transaction List */}
-            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
-                    <History size={16} className="text-gray-400"/>
-                    <h3 className="font-bold text-gray-700">{role === 'bf' ? '男友' : '女友'}的黃金存摺</h3>
-                </div>
-                <div className="divide-y divide-gray-100">
-                    {myTransactions.length === 0 ? (
-                        <div className="p-8 text-center text-gray-400 text-sm">還沒有黃金紀錄</div>
-                    ) : (
-                        myTransactions.map(t => {
-                            const itemValue = (Number(t.weight) || 0) * goldPrice;
-                            const itemProfit = itemValue - Number(t.totalCost);
-                            const itemRoi = t.totalCost > 0 ? (itemProfit / t.totalCost) * 100 : 0;
-
-                            return (
-                                <div key={t.id} onClick={() => onEdit(t)} className="p-4 flex items-start justify-between hover:bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer">
-                                    <div className="flex gap-3">
-                                        {t.photo ? (
-                                            <img src={t.photo} alt="receipt" className="w-12 h-12 rounded-xl object-cover border border-gray-200" />
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-xl bg-yellow-100 text-yellow-600 flex items-center justify-center">
-                                                <Tag size={20} />
-                                            </div>
-                                        )}
-                                        <div>
-                                            <div className="font-bold text-gray-800 flex items-center gap-2">
-                                                {formatWeight(t.weight, 'tw_qian')}
-                                                {t.note && <span className="text-xs font-normal text-gray-400">({t.note})</span>}
-                                            </div>
-                                            <div className="text-xs text-gray-400 flex gap-2 mt-0.5">
-                                                <span>{t.date}</span>
-                                                {t.channel && <span>• {t.channel}</span>}
-                                            </div>
-                                            <div className="text-[10px] text-gray-400 mt-1">成本 {formatMoney(t.totalCost)}</div>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className={`font-bold text-sm ${itemProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                            {itemProfit >= 0 ? '+' : ''}{formatMoney(itemProfit)}
-                                        </div>
-                                        <div className={`text-[10px] font-bold ${itemProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            {itemRoi.toFixed(1)}%
-                                        </div>
-                                        <button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="mt-2 text-gray-300 hover:text-red-400 p-1">
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-// --- Add Gold Modal (New) ---
-const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
-    const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
-    const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'kg'
-    // 修正白畫面：使用 Optional Chaining (?.) 與 Nullish Coalescing (??) 確保初始值安全
-    const [weightInput, setWeightInput] = useState(initialData?.weight?.toString() ?? '');
-    const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() ?? '');
-    const [channel, setChannel] = useState(initialData?.channel || '');
-    const [note, setNote] = useState(initialData?.note || '');
-    const [photo, setPhoto] = useState(initialData?.photo || null);
-    const [owner, setOwner] = useState(initialData?.owner || role);
-
-    const handlePhoto = async (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = async () => {
-                const compressed = await compressImage(reader.result);
-                setPhoto(compressed);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleSubmit = () => {
-        if (!weightInput || !totalCost) return;
-        
-        let weightInGrams = Number(weightInput);
-        if (unit === 'tw_qian') weightInGrams = weightInGrams * 3.75;
-        if (unit === 'kg') weightInGrams = weightInGrams * 1000;
-
-        onSave({
-            date,
-            weight: weightInGrams,
-            totalCost,
-            channel,
-            note,
-            photo,
-            owner
-        });
-    };
-
-    return (
-        <ModalLayout title={initialData ? "編輯黃金" : "記一筆黃金"} onClose={onClose}>
-            <div className="space-y-4 pt-2">
-                {/* Date & Owner */}
-                <div className="flex gap-2">
-                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 rounded-xl px-3 py-2 text-sm font-bold outline-none" />
-                    <div className="flex bg-gray-100 rounded-lg p-1 flex-1">
-                        <button onClick={() => setOwner('bf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'bf' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}>男友</button>
-                        <button onClick={() => setOwner('gf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'gf' ? 'bg-pink-500 text-white' : 'text-gray-500'}`}>女友</button>
-                    </div>
-                </div>
-
-                {/* Weight Input with Unit Toggle */}
-                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
-                    <div className="flex justify-between mb-2">
-                        <label className="text-xs font-bold text-gray-400">重量</label>
-                        <div className="flex gap-2 text-xs font-bold">
-                            <button onClick={()=>setUnit('tw_qian')} className={`${unit==='tw_qian'?'text-yellow-600 underline':'text-gray-300'}`}>台錢</button>
-                            <button onClick={()=>setUnit('g')} className={`${unit==='g'?'text-yellow-600 underline':'text-gray-300'}`}>公克</button>
-                            <button onClick={()=>setUnit('kg')} className={`${unit==='kg'?'text-yellow-600 underline':'text-gray-300'}`}>公斤</button>
-                        </div>
-                    </div>
-                    <div className="flex items-end gap-2">
-                        <input type="number" value={weightInput} onChange={e => setWeightInput(e.target.value)} placeholder="0.00" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
-                        <span className="mb-2 text-sm font-bold text-gray-400">{unit === 'tw_qian' ? '錢' : (unit === 'g' ? '克' : '公斤')}</span>
-                    </div>
-                </div>
-
-                {/* Cost Input */}
-                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
-                    <label className="text-xs font-bold text-gray-400 block mb-1">購買總金額 (台幣)</label>
-                    <input type="number" value={totalCost} onChange={e => setTotalCost(e.target.value)} placeholder="0" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
-                </div>
-
-                {/* Details */}
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-gray-50 p-2 rounded-xl">
-                        <label className="text-[10px] text-gray-400 block mb-1">購買管道</label>
-                        <input type="text" value={channel} onChange={e => setChannel(e.target.value)} placeholder="例: 銀行、銀樓" className="bg-transparent w-full text-sm font-bold outline-none" />
-                    </div>
-                    <div className="bg-gray-50 p-2 rounded-xl">
-                        <label className="text-[10px] text-gray-400 block mb-1">備註</label>
-                        <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="例: 生日禮物" className="bg-transparent w-full text-sm font-bold outline-none" />
-                    </div>
-                </div>
-
-                {/* Photo Upload */}
-                <label className="block w-full h-24 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 relative overflow-hidden">
-                    {photo ? (
-                        <>
-                            <img src={photo} className="absolute inset-0 w-full h-full object-cover opacity-50" />
-                            <div className="relative z-10 bg-black/50 text-white px-3 py-1 rounded-full text-xs">更換照片</div>
-                        </>
-                    ) : (
-                        <>
-                            <Camera size={24} />
-                            <span className="text-xs mt-1">上傳證明/照片</span>
-                        </>
-                    )}
-                    <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
-                </label>
-
-                <button onClick={handleSubmit} disabled={!weightInput || !totalCost} className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform">
-                    {initialData ? '儲存變更' : '確認入庫'}
-                </button>
-            </div>
-        </ModalLayout>
-    );
-};
+const ModalLayout = ({ title, onClose, children }) => (
+  <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="bg-white w-full sm:max-w-md h-auto max-h-[90vh] sm:rounded-3xl rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-[slideUp_0.3s_ease-out]">
+      <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
+        <h2 className="text-base font-bold text-gray-800">{title}</h2>
+        <button onClick={onClose} className="bg-gray-50 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={18} /></button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 hide-scrollbar">{children}</div>
+    </div>
+  </div>
+);
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
@@ -941,6 +1018,77 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
       </div>
     </ModalLayout>
   );
+};
+
+const AddJarModal = ({ onClose, onSave, initialData }) => {
+  const [name, setName] = useState(initialData?.name || '');
+  const [target, setTarget] = useState(initialData?.targetAmount?.toString() || '');
+  return (
+    <ModalLayout title={initialData ? "編輯存錢罐" : "新存錢罐"} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="bg-gray-50 p-3 rounded-2xl"><label className="block mb-1 text-xs font-bold text-gray-400">目標金額</label><div className="text-2xl font-black text-gray-800 tracking-wider h-8 flex items-center overflow-hidden">{target ? target : <span className="text-gray-300">0</span>}</div></div>
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="名稱 (例如: 旅遊基金)" className="w-full bg-gray-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none" />
+        <CalculatorKeypad value={target} onChange={setTarget} onConfirm={(val) => { if (name && val) onSave(name, val); }} compact={true} />
+      </div>
+    </ModalLayout>
+  );
+};
+
+const DepositModal = ({ jar, onClose, onConfirm, role }) => {
+  const [amount, setAmount] = useState('');
+  const [depositor, setDepositor] = useState(role);
+  if (!jar) return null;
+  return (
+    <ModalLayout title={`存入: ${jar.name}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="text-center"><div className="text-gray-400 text-xs mb-1">目前進度</div><div className="font-bold text-xl text-gray-800">{formatMoney(jar.currentAmount)} <span className="text-gray-300 text-sm">/ {formatMoney(jar.targetAmount)}</span></div></div>
+        <div className="bg-gray-50 p-2 rounded-xl"><div className="text-[10px] text-gray-400 text-center mb-1">是誰存的?</div><div className="flex bg-white rounded-lg p-1 shadow-sm"><button onClick={() => setDepositor('bf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button><button onClick={() => setDepositor('gf')} className={`flex-1 py-1 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button></div></div>
+        <div className="bg-gray-50 p-3 rounded-2xl text-center"><div className="text-xs text-gray-400 mb-1">存入金額</div><div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center text-green-500 overflow-hidden">{amount ? `+${amount}` : <span className="text-gray-300">0</span>}</div></div>
+        <CalculatorKeypad value={amount} onChange={setAmount} onConfirm={(val) => { if(Number(val) > 0) onConfirm(jar.id, val, depositor); }} compact={true} />
+      </div>
+    </ModalLayout>
+  );
+};
+
+const JarHistoryModal = ({ jar, onClose, onUpdateItem, onDeleteItem }) => {
+  const [editingItem, setEditingItem] = useState(null);
+  const [editAmount, setEditAmount] = useState('');
+  const history = [...(jar.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  return (
+    <ModalLayout title={`${jar.name} - 存錢紀錄`} onClose={onClose}>
+        {editingItem ? (<div className="space-y-4 animate-[fadeIn_0.2s]"><button onClick={() => setEditingItem(null)} className="flex items-center gap-1 text-gray-500 text-xs font-bold mb-2"><ArrowLeft size={14}/> 返回列表</button><div className="bg-gray-50 p-3 rounded-2xl text-center"><div className="text-xs text-gray-400 mb-1">修改金額</div><div className="text-3xl font-black text-gray-800 tracking-wider h-10 flex items-center justify-center overflow-hidden">{editAmount}</div></div><CalculatorKeypad value={editAmount} onChange={setEditAmount} onConfirm={(val) => { if(Number(val) >= 0) { onUpdateItem(jar, editingItem, val); setEditingItem(null); } }} compact={true} /></div>) : (<div className="space-y-2">{history.length === 0 ? <div className="text-center py-10 text-gray-400 text-sm">尚無詳細紀錄</div> : history.map((item, idx) => (<div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl"><div className="flex items-center gap-3"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${item.role === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>{item.role === 'bf' ? '👦' : '👧'}</div><div><div className="text-xs text-gray-400">{new Date(item.date).toLocaleDateString()}</div><div className="font-bold text-gray-800">{formatMoney(item.amount)}</div></div></div><div className="flex gap-2"><button onClick={() => { setEditingItem(item); setEditAmount(item.amount.toString()); }} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-blue-500"><Pencil size={16}/></button><button onClick={() => onDeleteItem(jar, item)} className="p-2 bg-white rounded-lg shadow-sm text-gray-400 hover:text-red-500"><Trash2 size={16}/></button></div></div>))}</div>)}
+    </ModalLayout>
+  );
+};
+
+const RouletteModal = ({ jars, onClose, onConfirm, role }) => {
+  const [spinning, setSpinning] = useState(false);
+  const [result, setResult] = useState(null); 
+  const [displayNum, setDisplayNum] = useState(1);
+  const [selectedJarId, setSelectedJarId] = useState('');
+  const [depositor, setDepositor] = useState(role);
+  const intervalRef = useRef(null);
+  useEffect(() => { if (jars.length > 0 && !selectedJarId) { setSelectedJarId(jars[0].id); } }, [jars, selectedJarId]);
+  const spin = () => { setSpinning(true); setResult(null); intervalRef.current = setInterval(() => { setDisplayNum(Math.floor(Math.random() * 99) + 1); }, 50); setTimeout(() => { if (intervalRef.current) clearInterval(intervalRef.current); const final = Math.floor(Math.random() * 99) + 1; setDisplayNum(final); setResult(final); setSpinning(false); }, 1500); };
+  const handleDeposit = () => { if(result && selectedJarId) { let finalAmount = result; if (depositor === 'both') { finalAmount = result * 2; } onConfirm(selectedJarId, finalAmount.toString(), depositor); onClose(); } };
+  return (
+      <ModalLayout title="🎲 命運轉盤 (1~99元)" onClose={onClose}>
+          <div className="flex flex-col items-center gap-6 py-4">
+              <div className="relative w-48 h-48 rounded-full border-8 border-purple-100 flex items-center justify-center shadow-inner bg-white"><div className="absolute inset-0 rounded-full border-4 border-dashed border-purple-200 animate-spin-slow" style={{ animationDuration: spinning ? '2s' : '10s' }}></div><div className="text-center z-10"><div className="text-xs font-bold text-gray-400 mb-1">{spinning ? '轉動中...' : (result ? '恭喜選中!' : '試試手氣')}</div><div className={`text-6xl font-black tracking-tight transition-colors ${spinning ? 'text-gray-300 scale-90 blur-[1px]' : 'text-purple-600 scale-100'}`}>{displayNum}</div><div className="text-sm font-bold text-purple-300 mt-1">NT$</div></div></div>
+              {!result ? (<button onClick={spin} disabled={spinning} className="w-full py-4 bg-purple-600 text-white rounded-2xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 text-lg flex items-center justify-center gap-2">{spinning ? <Loader2 className="animate-spin" /> : <Dices />}{spinning ? '命運轉動中...' : '開始轉動！'}</button>) : (<div className="w-full space-y-4 animate-[fadeIn_0.3s]"><div className="bg-gray-50 p-4 rounded-2xl space-y-3"><div className="flex justify-between items-center text-sm font-bold text-gray-600 border-b border-gray-200 pb-2"><span>存入金額</span><div className="text-right"><span className="text-purple-600 text-lg block">{formatMoney(depositor === 'both' ? result * 2 : result)}</span>{depositor === 'both' && <span className="text-[10px] text-gray-400 block">({result} x 2人)</span>}</div></div><div><div className="text-[10px] text-gray-400 mb-1">誰要存?</div><div className="flex bg-white rounded-lg p-1 shadow-sm"><button onClick={() => setDepositor('bf')} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${depositor === 'bf' ? 'bg-blue-100 text-blue-600' : 'text-gray-400'}`}>男友</button><button onClick={() => setDepositor('gf')} className={`flex-1 py-1.5 rounded-md text-xs font-bold ${depositor === 'gf' ? 'bg-pink-100 text-pink-600' : 'text-gray-400'}`}>女友</button><button onClick={() => setDepositor('both')} className={`flex-[1.2] py-1.5 rounded-md text-xs font-bold flex items-center justify-center gap-1 ${depositor === 'both' ? 'bg-purple-100 text-purple-600' : 'text-gray-400'}`}><Users size={12}/> 一起 (+100%)</button></div></div><div><div className="text-[10px] text-gray-400 mb-1">存到哪?</div><select value={selectedJarId} onChange={(e) => setSelectedJarId(e.target.value)} className="w-full bg-white p-3 rounded-lg text-sm font-bold border-none outline-none text-gray-700 shadow-sm">{jars.map(j => (<option key={j.id} value={j.id}>{j.name}</option>))}</select></div></div><div className="flex gap-2"><button onClick={spin} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm">重轉一次</button><button onClick={handleDeposit} className="flex-[2] py-3 bg-gray-900 text-white rounded-xl font-bold text-sm shadow-lg">確認存入</button></div></div>)}
+          </div>
+      </ModalLayout>
+  );
+};
+
+const RepaymentModal = ({ debt, onClose, onSave }) => {
+    const displayAmount = Math.abs(debt);
+    const handleConfirm = () => { onSave({ amount: displayAmount, category: 'repayment', note: '結清欠款', date: new Date().toISOString().split('T')[0], paidBy: debt > 0 ? 'gf' : 'bf', splitType: 'shared' }); onClose(); };
+    return (
+        <ModalLayout title="結清款項" onClose={onClose}>
+            <div className="text-center space-y-4 py-4"><div className="text-gray-500 text-sm">{debt > 0 ? '👧 女朋友' : '👦 男朋友'} 需要支付給<br/><span className="font-bold text-gray-800 text-lg">{debt > 0 ? '男朋友 👦' : '女朋友 👧'}</span></div><div className="text-4xl font-black text-gray-800">{formatMoney(displayAmount)}</div><p className="text-xs text-gray-400">確認對方已收到款項後再點擊結清</p><button onClick={handleConfirm} className="w-full py-3 bg-green-500 text-white rounded-xl font-bold shadow-lg shadow-green-200 active:scale-95 transition-transform"><CheckCircle className="inline mr-2" size={18}/>確認已還款</button></div>
+        </ModalLayout>
+    );
 };
 
 // --- Main App Component ---
