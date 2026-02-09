@@ -28,7 +28,7 @@ const firebaseConfig = {
   measurementId: "G-XD01TYP1PQ"
 };
 
-// --- API Helpers ---
+// --- Helper Functions ---
 const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
     const apiKey = "AIzaSyAVr-jNp2WiiAauPoscBNuDkF-wlg2QofA"; 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -86,29 +86,6 @@ const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
         throw error;
     }
 };
-
-let app;
-try {
-  app = initializeApp(firebaseConfig);
-} catch (e) {
-  // Ignore
-}
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const appId = rawAppId.replace(/\//g, '_').replace(/\./g, '_');
-
-// --- Constants ---
-const CATEGORIES = [
-  { id: 'food', name: '餐飲', color: '#FF8042' },
-  { id: 'transport', name: '交通', color: '#00C49F' },
-  { id: 'entertainment', name: '娛樂', color: '#FFBB28' },
-  { id: 'shopping', name: '購物', color: '#0088FE' },
-  { id: 'house', name: '居家', color: '#8884d8' },
-  { id: 'travel', name: '旅遊', color: '#FF6B6B' },
-  { id: 'other', name: '其他', color: '#999' },
-];
 
 const formatMoney = (amount) => {
   const num = Number(amount);
@@ -208,7 +185,30 @@ const compressImage = (base64Str, maxWidth = 800, quality = 0.6) => {
     });
 };
 
-// --- Components ---
+// --- Firebase Init ---
+let app;
+try {
+  app = initializeApp(firebaseConfig);
+} catch (e) {
+  // Ignore
+}
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const appId = rawAppId.replace(/\//g, '_').replace(/\./g, '_');
+
+const CATEGORIES = [
+  { id: 'food', name: '餐飲', color: '#FF8042' },
+  { id: 'transport', name: '交通', color: '#00C49F' },
+  { id: 'entertainment', name: '娛樂', color: '#FFBB28' },
+  { id: 'shopping', name: '購物', color: '#0088FE' },
+  { id: 'house', name: '居家', color: '#8884d8' },
+  { id: 'travel', name: '旅遊', color: '#FF6B6B' },
+  { id: 'other', name: '其他', color: '#999' },
+];
+
+// --- Sub-Components (Defined BEFORE App) ---
 
 const AppLoading = () => (
   <div style={{
@@ -317,16 +317,18 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
-// --- Gold Chart Component ---
 const GoldChart = ({ data, intraday, period, loading }) => {
     if (loading) {
         return <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs"><Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...</div>;
     }
     
+    // 決定要使用的數據源
     const chartData = useMemo(() => {
+        // 如果選的是即時 (1d)，且有 intraday 資料，就用 intraday
         if (period === '1d') {
             return intraday && intraday.length > 0 ? intraday : []; 
         }
+        // 否則使用歷史日線資料
         if (!data || data.length === 0) return [];
         if (period === '5d') return data.slice(-5);
         if (period === '3m') return data.slice(-90); 
@@ -374,571 +376,6 @@ const GoldChart = ({ data, intraday, period, loading }) => {
     );
 };
 
-export default function CoupleLedgerApp() {
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null); 
-  const [activeTab, setActiveTab] = useState('overview');
-
-  const [transactions, setTransactions] = useState([]);
-  const [jars, setJars] = useState([]);
-  const [books, setBooks] = useState([]);
-  const [goldTransactions, setGoldTransactions] = useState([]);
-  
-  const [activeBookId, setActiveBookId] = useState(null);
-  const [viewArchived, setViewArchived] = useState(false);
-
-  const [showAddTransaction, setShowAddTransaction] = useState(false);
-  const [editingTransaction, setEditingTransaction] = useState(null); 
-  const [showAddJar, setShowAddJar] = useState(false);
-  const [editingJar, setEditingJar] = useState(null); 
-  const [showJarDeposit, setShowJarDeposit] = useState(null);
-  const [showJarHistory, setShowJarHistory] = useState(null); 
-  const [repaymentDebt, setRepaymentDebt] = useState(null);
-  const [showRoulette, setShowRoulette] = useState(false);
-  const [showAddGold, setShowAddGold] = useState(false);
-  const [editingGold, setEditingGold] = useState(null);
-    
-  const [showBookManager, setShowBookManager] = useState(false);
-  const [editingBook, setEditingBook] = useState(null);
-  const [showScanner, setShowScanner] = useState(false);
-    
-  const [toast, setToast] = useState(null); 
-  const [confirmModal, setConfirmModal] = useState({ isOpen: false });
-
-  const [goldPrice, setGoldPrice] = useState(0); 
-  const [goldHistory, setGoldHistory] = useState([]);
-  const [goldIntraday, setGoldIntraday] = useState([]); 
-  const [goldPeriod, setGoldPeriod] = useState('1d'); 
-  const [goldLoading, setGoldLoading] = useState(false);
-  const [goldError, setGoldError] = useState(null);
-
-  useEffect(() => {
-    if (!document.querySelector('script[src*="tailwindcss"]')) {
-      const script = document.createElement('script');
-      script.src = "https://cdn.tailwindcss.com";
-      document.head.appendChild(script);
-    }
-    const timer = setTimeout(() => setLoading(false), 2000);
-    const initAuth = async () => { 
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            try { 
-                await signInWithCustomToken(auth, __initial_auth_token); 
-            } catch(e) { 
-                console.warn("Custom token failed, attempting anonymous sign-in:", e);
-                try { await signInAnonymously(auth); } catch (e2) { console.error("Anonymous fallback failed:", e2); }
-            }
-        } else {
-            try { await signInAnonymously(auth); } catch (e) { console.error("Anonymous sign-in failed:", e); } 
-        }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    const savedRole = localStorage.getItem('couple_app_role');
-    if (savedRole) setRole(savedRole);
-    return () => { clearTimeout(timer); unsubscribe(); };
-  }, []);
-
-  const fetchGoldPrice = async () => {
-      setGoldLoading(true);
-      setGoldError(null);
-      try {
-          const response = await fetch('/api/gold');
-          if (!response.ok) {
-              throw new Error(`連線錯誤 (${response.status})`);
-          }
-          const data = await response.json();
-          if (data.success) {
-              setGoldPrice(data.currentPrice);
-              setGoldHistory(data.history);
-              setGoldIntraday(data.intraday || []);
-          } else {
-              throw new Error(data.error || '無法讀取資料');
-          }
-      } catch (err) {
-          console.error("Gold Fetch Error:", err);
-          setGoldError(`台銀連線失敗: ${err.message}`);
-          setGoldPrice(2880); 
-          setGoldHistory([{date:'-', price: 2880, label: '-'}]);
-      } finally {
-          setGoldLoading(false);
-      }
-  };
-
-  useEffect(() => {
-      if (activeTab === 'gold') {
-          fetchGoldPrice();
-      }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (!user) return;
-    try {
-        const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
-        const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
-        const booksRef = collection(db, 'artifacts', appId, 'public', 'data', 'books');
-        const goldRef = collection(db, 'artifacts', appId, 'public', 'data', 'gold_transactions');
-        
-        const unsubBooks = onSnapshot(booksRef, async (s) => {
-            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-            data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-            if (data.length === 0 && !s.metadata.hasPendingWrites) {
-               await addDoc(booksRef, { name: "預設帳本", status: 'active', createdAt: serverTimestamp() });
-               return; 
-            }
-            setBooks(data);
-            setActiveBookId(prev => {
-                if (prev && data.find(b => b.id === prev)) return prev;
-                const firstActive = data.find(b => (b.status || 'active') === 'active');
-                if (firstActive) return firstActive.id;
-                return data[0]?.id || null;
-            });
-        });
-
-        const unsubTrans = onSnapshot(transRef, (s) => {
-          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-          data.sort((a, b) => {
-            const dateA = new Date(a.date).getTime();
-            const dateB = new Date(b.date).getTime();
-            if (dateB !== dateA) return dateB - dateA;
-            return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
-          });
-          setTransactions(data);
-        });
-
-        const unsubJars = onSnapshot(jarsRef, (s) => setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))));
-        
-        const unsubGold = onSnapshot(goldRef, (s) => {
-            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
-            data.sort((a, b) => new Date(b.date) - new Date(a.date));
-            setGoldTransactions(data);
-        });
-
-        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); };
-    } catch (e) { console.error(e); }
-  }, [user]);
-
-  const filteredTransactions = useMemo(() => {
-      if (!activeBookId) return [];
-      const defaultBookId = books[0]?.id;
-      return transactions.filter(t => {
-          if (t.bookId) return t.bookId === activeBookId;
-          return activeBookId === defaultBookId;
-      });
-  }, [transactions, activeBookId, books]);
-
-  const displayBooks = useMemo(() => {
-      return books.filter(b => {
-          const status = b.status || 'active';
-          return viewArchived ? status === 'archived' : status === 'active';
-      });
-  }, [books, viewArchived]);
-
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
-
-  const handleSaveTransaction = async (data) => {
-    if (!user) return;
-    try {
-      const finalAmount = Number(safeCalculate(data.amount));
-      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId }; 
-      if (editingTransaction) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
-        showToast('紀錄已更新 ✨');
-      } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...cleanData, createdAt: serverTimestamp() });
-        showToast('紀錄已新增 🎉');
-      }
-      setShowAddTransaction(false);
-      setEditingTransaction(null);
-      setRepaymentDebt(null); 
-    } catch (e) { console.error(e); }
-  };
-
-  const handleSaveGold = async (data) => {
-      if(!user) return;
-      try {
-          const payload = {
-              date: data.date,
-              weight: Number(data.weight), 
-              totalCost: Number(data.totalCost),
-              owner: data.owner,
-              channel: data.channel,
-              note: data.note,
-              photo: data.photo || null,
-              createdAt: serverTimestamp()
-          };
-
-          if (editingGold) {
-              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gold_transactions', editingGold.id), payload);
-              showToast('黃金紀錄已更新 ✨');
-          } else {
-              await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'gold_transactions'), payload);
-              showToast('黃金已入庫 💰');
-          }
-          setShowAddGold(false);
-          setEditingGold(null);
-      } catch(e) { console.error(e); }
-  };
-
-  const handleDeleteTransaction = (id) => {
-    setConfirmModal({
-      isOpen: true, title: "刪除紀錄", message: "確定要刪除這筆紀錄嗎？", isDanger: true,
-      onConfirm: async () => {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
-        showToast('已刪除 🗑️');
-        setConfirmModal({ isOpen: false });
-      }
-    });
-  };
-  
-  const handleDeleteGold = (id) => {
-      setConfirmModal({
-          isOpen: true, title: "刪除黃金紀錄", message: "確定要刪除這筆紀錄嗎？", isDanger: true,
-          onConfirm: async () => {
-              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gold_transactions', id));
-              showToast('已刪除 🗑️');
-              setConfirmModal({ isOpen: false });
-          }
-      });
-  };
-
-  const handleSaveJar = async (name, target) => {
-    if (!user) return;
-    try {
-      const finalTarget = Number(safeCalculate(target));
-      if (editingJar) {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), { name, targetAmount: finalTarget, updatedAt: serverTimestamp() });
-         showToast('存錢罐已更新 ✨');
-      } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), { 
-            name, 
-            targetAmount: finalTarget, 
-            currentAmount: 0, 
-            contributions: { bf: 0, gf: 0 }, 
-            history: [], 
-            createdAt: serverTimestamp() 
-        });
-        showToast('存錢罐已建立 🎯');
-      }
-      setShowAddJar(false);
-      setEditingJar(null);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleDeleteJar = (id) => {
-    setConfirmModal({
-      isOpen: true, title: "刪除目標", message: "確定要打破這個存錢罐嗎？", isDanger: true,
-      onConfirm: async () => {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', id));
-        showToast('已刪除 🗑️');
-        setConfirmModal({ isOpen: false });
-      }
-    });
-  };
-
-  const depositToJar = async (jarId, amount, contributorRole) => {
-    const jar = jars.find(j => j.id === jarId);
-    if (!jar) return;
-    try {
-      const depositAmount = Number(safeCalculate(amount));
-      const newAmount = (jar.currentAmount || 0) + depositAmount;
-      
-      const newContrib = { ...jar.contributions };
-      if (contributorRole === 'both') {
-          const half = depositAmount / 2;
-          newContrib.bf = (newContrib.bf || 0) + half;
-          newContrib.gf = (newContrib.gf || 0) + half;
-      } else {
-          newContrib[contributorRole] = (newContrib[contributorRole] || 0) + depositAmount;
-      }
-      
-      const newHistoryItem = {
-          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-          amount: depositAmount,
-          role: contributorRole, 
-          date: new Date().toISOString()
-      };
-      const newHistory = [newHistoryItem, ...(jar.history || [])];
-
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jarId), { 
-          currentAmount: newAmount, 
-          contributions: newContrib,
-          history: newHistory
-      });
-      setShowJarDeposit(null);
-      showToast(`已存入 $${depositAmount} 💰`);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleUpdateJarHistoryItem = async (jar, oldItem, newAmount) => {
-    try {
-        const diff = Number(newAmount) - oldItem.amount;
-        const newTotal = (jar.currentAmount || 0) + diff;
-        const newContrib = { ...jar.contributions };
-        if (oldItem.role === 'both') {
-            const halfDiff = diff / 2;
-            newContrib.bf = (newContrib.bf || 0) + halfDiff;
-            newContrib.gf = (newContrib.gf || 0) + halfDiff;
-        } else {
-            newContrib[oldItem.role] = (newContrib[oldItem.role] || 0) + diff;
-        }
-        const newHistory = (jar.history || []).map(item => item.id === oldItem.id ? { ...item, amount: Number(newAmount) } : item);
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
-        showToast('紀錄已修正 ✨');
-    } catch(e) { console.error(e); }
-  };
-
-  const handleDeleteJarHistoryItem = async (jar, item) => {
-    setConfirmModal({
-        isOpen: true, title: "刪除存錢紀錄", message: "確定要刪除這筆存款嗎？", isDanger: true,
-        onConfirm: async () => {
-            try {
-                const newTotal = (jar.currentAmount || 0) - item.amount;
-                const newContrib = { ...jar.contributions };
-                if (item.role === 'both') {
-                    const half = item.amount / 2;
-                    newContrib.bf = Math.max(0, (newContrib.bf || 0) - half);
-                    newContrib.gf = Math.max(0, (newContrib.gf || 0) - half);
-                } else {
-                    newContrib[item.role] = Math.max(0, (newContrib[item.role] || 0) - item.amount);
-                }
-                const newHistory = (jar.history || []).filter(h => h.id !== item.id);
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
-                showToast('紀錄已刪除 🗑️');
-                setConfirmModal(prev => ({ ...prev, isOpen: false }));
-            } catch(e) { console.error(e); }
-        }
-    });
-  };
-
-  const handleSaveBook = async (name, status = 'active') => {
-      if(!user || !name.trim()) return;
-      try {
-          if(editingBook) {
-              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', editingBook.id), {
-                  name, status, updatedAt: serverTimestamp()
-              });
-              showToast('帳本已更新 ✨');
-          } else {
-              const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'books'), {
-                  name, status, createdAt: serverTimestamp()
-              });
-              setActiveBookId(docRef.id); 
-              showToast('新帳本已建立 📘');
-          }
-          setShowBookManager(false);
-          setEditingBook(null);
-      } catch(e) { console.error(e); }
-  };
-
-  const handleDeleteBook = async (bookId) => {
-      if(books.filter(b => (b.status||'active') === 'active').length <= 1 && editingBook?.status !== 'archived') {
-          showToast('至少需要保留一個使用中的帳本 ⚠️');
-          return;
-      }
-      setConfirmModal({
-        isOpen: true, title: "刪除帳本", message: "確定要永久刪除這個帳本嗎？", isDanger: true,
-        onConfirm: async () => {
-            try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', bookId));
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), where("bookId", "==", bookId));
-                const snap = await getDocs(q);
-                const batch = writeBatch(db);
-                snap.docs.forEach(d => batch.delete(d.ref));
-                await batch.commit();
-                if(activeBookId === bookId) {
-                    const remaining = books.filter(b => b.id !== bookId && (b.status||'active') === 'active');
-                    if(remaining.length > 0) setActiveBookId(remaining[0].id);
-                }
-                showToast('帳本已刪除 🗑️');
-                setConfirmModal(prev => ({ ...prev, isOpen: false }));
-            } catch(e) { console.error(e); }
-        }
-      });
-  };
-
-  const handleScanComplete = (scannedItem) => {
-      setEditingTransaction({
-          amount: scannedItem.amount,
-          note: scannedItem.note,
-          category: scannedItem.category,
-          date: scannedItem.date || new Date().toISOString().split('T')[0],
-      });
-      setShowScanner(false);
-      setShowAddTransaction(true);
-  };
-
-  if (loading) return <AppLoading />;
-  if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role', r); }} />;
-
-  return (
-    <div className="min-h-screen w-full bg-gray-50 font-sans text-gray-800 pb-24">
-      <style>{`.hide-scrollbar::-webkit-scrollbar { display: none; }`}</style>
-      <div className={`p-4 text-white shadow-lg sticky top-0 z-40 transition-colors ${role === 'bf' ? 'bg-blue-600' : 'bg-pink-500'}`}>
-        <div className="flex justify-between items-center max-w-2xl mx-auto">
-          <div className="flex items-center gap-2">
-            <div className="bg-white/20 p-2 rounded-full backdrop-blur-md"><Heart className="fill-white animate-pulse" size={18} /></div>
-            <h1 className="text-lg font-bold tracking-wide">我們的小金庫</h1>
-          </div>
-          <div className="flex items-center gap-3">
-              {activeTab === 'overview' && (
-                  <button 
-                    onClick={() => setViewArchived(!viewArchived)}
-                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${viewArchived ? 'bg-white text-gray-800 border-white' : 'bg-transparent text-white/80 border-white/30'}`}
-                  >
-                      {viewArchived ? <Archive size={12}/> : <Book size={12}/>}
-                      {viewArchived ? '歷史' : '使用中'}
-                  </button>
-              )}
-              <div className="text-xs bg-black/10 px-3 py-1 rounded-full">{role === 'bf' ? '👦 男朋友' : '👧 女朋友'}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-2xl mx-auto p-4">
-        {activeTab === 'overview' && (
-             <div className="mb-4">
-                 {viewArchived && <div className="text-xs text-gray-400 mb-2 font-bold flex items-center gap-1"><Archive size={12}/> 歷史封存區 (唯讀模式)</div>}
-                 <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
-                     {displayBooks.map(book => (
-                         <button 
-                           key={book.id} 
-                           onClick={() => setActiveBookId(book.id)}
-                           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all shadow-sm ${activeBookId === book.id ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
-                         >
-                             <Book size={14} />
-                             {book.name}
-                             {activeBookId === book.id && (
-                                 <div onClick={(e) => { e.stopPropagation(); setEditingBook(book); setShowBookManager(true); }} className="ml-1 p-1 rounded-full hover:bg-white/20">
-                                     <Settings size={12} />
-                                 </div>
-                             )}
-                         </button>
-                     ))}
-                     {!viewArchived && (
-                         <button onClick={() => { setEditingBook(null); setShowBookManager(true); }} className="px-3 py-2 bg-white text-gray-400 rounded-xl shadow-sm hover:bg-gray-50">
-                             <Plus size={18} />
-                         </button>
-                     )}
-                     {displayBooks.length === 0 && <div className="text-gray-400 text-sm italic py-2">沒有{viewArchived ? '封存' : '使用中'}的帳本</div>}
-                 </div>
-             </div>
-        )}
-        
-        {activeTab === 'overview' && (
-            <Overview 
-                transactions={filteredTransactions} 
-                role={role} 
-                readOnly={viewArchived}
-                onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
-                onScan={() => setShowScanner(true)}
-                onEdit={(t) => { 
-                    if(viewArchived) return; 
-                    setEditingTransaction(t); 
-                    setShowAddTransaction(true); 
-                }} 
-                onDelete={(id) => {
-                    if(viewArchived) return;
-                    handleDeleteTransaction(id);
-                }} 
-                onRepay={(debt) => setRepaymentDebt(debt)}
-            />
-        )}
-
-        {activeTab === 'stats' && (
-            <div>
-                <div className="bg-white px-4 py-2 rounded-xl shadow-sm mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600">
-                    <Book size={14}/> 統計範圍: {books.find(b => b.id === activeBookId)?.name || '未知帳本'}
-                </div>
-                <Statistics transactions={filteredTransactions} />
-            </div>
-        )}
-        {activeTab === 'savings' && (
-            <Savings 
-                jars={jars} 
-                role={role} 
-                onAdd={() => { setEditingJar(null); setShowAddJar(true); }} 
-                onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} 
-                onDeposit={(id) => setShowJarDeposit(id)} 
-                onDelete={handleDeleteJar} 
-                onHistory={(j) => setShowJarHistory(j)} 
-                onOpenRoulette={() => setShowRoulette(true)}
-            />
-        )}
-        {activeTab === 'gold' && (
-            <GoldView 
-                transactions={goldTransactions}
-                goldPrice={goldPrice}
-                history={goldHistory}
-                period={goldPeriod}
-                setPeriod={setGoldPeriod}
-                role={role}
-                onAdd={() => { setEditingGold(null); setShowAddGold(true); }}
-                onEdit={(t) => { setEditingGold(t); setShowAddGold(true); }}
-                onDelete={handleDeleteGold}
-                loading={goldLoading}
-                error={goldError}
-                onRefresh={fetchGoldPrice}
-                intraday={goldIntraday}
-            />
-        )}
-        {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
-      </div>
-
-      <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50">
-        <div className="flex justify-around py-3 max-w-2xl mx-auto">
-          <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
-          <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
-          <NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
-          <NavBtn icon={Coins} label="黃金" active={activeTab === 'gold'} onClick={() => setActiveTab('gold')} role={role} />
-          <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
-        </div>
-      </div>
-
-      {toast && <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-[fadeIn_0.3s_ease-out]"><CheckCircle size={18} className="text-green-400" /><span className="text-sm font-medium">{toast}</span></div>}
-
-      {confirmModal.isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) setConfirmModal(prev => ({ ...prev, isOpen: false })); }}>
-          <div className="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
-            <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
-            <p className="text-gray-500 text-sm mb-6">{confirmModal.message}</p>
-            <div className="flex gap-3">
-              <button onClick={() => setConfirmModal({ isOpen: false })} className="flex-1 py-3 bg-gray-100 rounded-xl text-sm font-bold text-gray-600">取消</button>
-              <button onClick={confirmModal.onConfirm} className={`flex-1 py-3 rounded-xl text-sm font-bold text-white ${confirmModal.isDanger ? 'bg-red-500' : 'bg-blue-500'}`}>確定</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
-      {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} />}
-      {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
-      {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
-      {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
-      {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} currentPrice={goldPrice} initialData={editingGold} role={role} />}
-      
-      {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
-
-      {repaymentDebt !== null && (
-          <RepaymentModal 
-              debt={repaymentDebt} 
-              onClose={() => setRepaymentDebt(null)} 
-              onSave={handleSaveTransaction}
-          />
-      )}
-
-      {showBookManager && (
-          <BookManagerModal 
-            onClose={() => setShowBookManager(false)} 
-            onSave={handleSaveBook} 
-            onDelete={handleDeleteBook}
-            initialData={editingBook}
-          />
-      )}
-    </div>
-  );
-}
-
 const NavBtn = ({ icon: Icon, label, active, onClick, role }) => (
   <button onClick={onClick} className={`flex flex-col items-center gap-1 w-full ${active ? (role === 'bf' ? 'text-blue-600' : 'text-pink-600') : 'text-gray-400'}`}>
     <Icon size={24} strokeWidth={active ? 2.5 : 2} />
@@ -957,229 +394,6 @@ const RoleSelection = ({ onSelect }) => (
     </div>
   </div>
 );
-
-// --- Gold View Component (Enhanced) ---
-const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
-    const myTransactions = transactions.filter(t => t.owner === role);
-    const totalWeightGrams = myTransactions.reduce((acc, t) => acc + (Number(t.weight) || 0), 0);
-    const totalCost = myTransactions.reduce((acc, t) => acc + (Number(t.totalCost) || 0), 0);
-    const currentValue = totalWeightGrams * goldPrice;
-    const profit = currentValue - totalCost;
-    const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
-
-    return (
-        <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
-            <div className={`p-6 rounded-3xl shadow-lg text-white relative overflow-hidden ${role === 'bf' ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-gradient-to-br from-pink-500 to-rose-600'}`}>
-                <div className="absolute top-0 right-0 p-4 opacity-20"><Coins size={80} /></div>
-                <div className="relative z-10">
-                    <div className="flex justify-between items-start">
-                        <div className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                            {role === 'bf' ? '👦 男朋友' : '👧 女朋友'} 的黃金總值 (台幣)
-                        </div>
-                        <button onClick={onRefresh} disabled={loading} className={`p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors ${loading ? 'animate-spin' : ''}`}>
-                            <RefreshCcw size={14} className="text-white"/>
-                        </button>
-                    </div>
-                    <div className="text-3xl font-black mb-4">{formatMoney(currentValue)}</div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
-                             <div className="text-white/70 text-[10px] mb-1">持有重量 (台錢)</div>
-                             <div className="text-lg font-bold flex items-end gap-1">
-                                {formatWeight(totalWeightGrams, 'tw_qian')}
-                                <span className="text-[10px] font-normal opacity-70">({formatWeight(totalWeightGrams)})</span>
-                             </div>
-                        </div>
-                        <div className={`rounded-xl p-3 backdrop-blur-sm ${profit >= 0 ? 'bg-green-400/30' : 'bg-red-400/30'}`}>
-                             <div className="text-white/70 text-[10px] mb-1">預估損益</div>
-                             <div className={`text-lg font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-100' : 'text-red-100'}`}>
-                                {profit >= 0 ? '+' : ''}{formatMoney(profit)}
-                             </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between text-xs font-bold text-white/70">
-                         <span>購入成本: {formatMoney(totalCost)}</span>
-                         <span className={profit >= 0 ? 'text-green-100' : 'text-red-100'}>ROI: {roi.toFixed(2)}%</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-                <div className="flex justify-between items-center mb-2">
-                    <div>
-                        <div className="text-xs text-gray-400 font-bold flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                            台銀賣出金價
-                        </div>
-                        <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
-                            {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
-                        </div>
-                    </div>
-                    <div className="flex bg-gray-100 rounded-lg p-1">
-                        {['1d', '5d', '3m'].map(p => (
-                            <button key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
-                                {p === '1d' ? '即時' : (p === '5d' ? '近五日' : '近三月')}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                
-                <GoldChart data={history} intraday={intraday} period={period} loading={loading} />
-                {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
-            </div>
-
-            <button onClick={onAdd} className="w-full bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                <Plus size={20} />
-                <span className="font-bold">記一筆黃金</span>
-            </button>
-
-            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
-                    <History size={16} className="text-gray-400"/>
-                    <h3 className="font-bold text-gray-700">{role === 'bf' ? '男友' : '女友'}的黃金存摺</h3>
-                </div>
-                <div className="divide-y divide-gray-100">
-                    {myTransactions.length === 0 ? (
-                        <div className="p-8 text-center text-gray-400 text-sm">還沒有黃金紀錄</div>
-                    ) : (
-                        myTransactions.map(t => {
-                            const itemValue = (Number(t.weight) || 0) * goldPrice;
-                            const itemProfit = itemValue - Number(t.totalCost);
-                            const itemRoi = t.totalCost > 0 ? (itemProfit / t.totalCost) * 100 : 0;
-
-                            return (
-                                <div key={t.id} onClick={() => onEdit(t)} className="p-4 flex items-start justify-between hover:bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer">
-                                    <div className="flex gap-3">
-                                        {t.photo ? (
-                                            <img src={t.photo} alt="receipt" className="w-12 h-12 rounded-xl object-cover border border-gray-200" />
-                                        ) : (
-                                            <div className="w-12 h-12 rounded-xl bg-yellow-100 text-yellow-600 flex items-center justify-center">
-                                                <Tag size={20} />
-                                            </div>
-                                        )}
-                                        <div>
-                                            <div className="font-bold text-gray-800 flex items-center gap-2">
-                                                {formatWeight(t.weight, 'tw_qian')}
-                                                {t.note && <span className="text-xs font-normal text-gray-400">({t.note})</span>}
-                                            </div>
-                                            <div className="text-xs text-gray-400 flex gap-2 mt-0.5">
-                                                <span>{t.date}</span>
-                                                {t.channel && <span>• {t.channel}</span>}
-                                            </div>
-                                            <div className="text-[10px] text-gray-400 mt-1">成本 {formatMoney(t.totalCost)}</div>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className={`font-bold text-sm ${itemProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                            {itemProfit >= 0 ? '+' : ''}{formatMoney(itemProfit)}
-                                        </div>
-                                        <div className={`text-[10px] font-bold ${itemProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                            {itemRoi.toFixed(1)}%
-                                        </div>
-                                        <button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="mt-2 text-gray-300 hover:text-red-400 p-1">
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
-    const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
-    const [unit, setUnit] = useState('g'); 
-    const [weightInput, setWeightInput] = useState(initialData ? (initialData.weight).toString() : '');
-    const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() || '');
-    const [channel, setChannel] = useState(initialData?.channel || '');
-    const [note, setNote] = useState(initialData?.note || '');
-    const [photo, setPhoto] = useState(initialData?.photo || null);
-    const [owner, setOwner] = useState(initialData?.owner || role);
-
-    const handlePhoto = async (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = async () => {
-                const compressed = await compressImage(reader.result);
-                setPhoto(compressed);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleSubmit = () => {
-        if (!weightInput || !totalCost) return;
-        let weightInGrams = Number(weightInput);
-        if (unit === 'tw_qian') weightInGrams = weightInGrams * 3.75;
-        if (unit === 'kg') weightInGrams = weightInGrams * 1000;
-        onSave({ date, weight: weightInGrams, totalCost, channel, note, photo, owner });
-    };
-
-    return (
-        <ModalLayout title={initialData ? "編輯黃金" : "記一筆黃金"} onClose={onClose}>
-            <div className="space-y-4 pt-2">
-                <div className="flex gap-2">
-                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 rounded-xl px-3 py-2 text-sm font-bold outline-none" />
-                    <div className="flex bg-gray-100 rounded-lg p-1 flex-1">
-                        <button onClick={() => setOwner('bf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'bf' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}>男友</button>
-                        <button onClick={() => setOwner('gf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'gf' ? 'bg-pink-500 text-white' : 'text-gray-500'}`}>女友</button>
-                    </div>
-                </div>
-                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
-                    <div className="flex justify-between mb-2">
-                        <label className="text-xs font-bold text-gray-400">重量</label>
-                        <div className="flex gap-2 text-xs font-bold">
-                            <button onClick={()=>setUnit('tw_qian')} className={`${unit==='tw_qian'?'text-yellow-600 underline':'text-gray-300'}`}>台錢</button>
-                            <button onClick={()=>setUnit('g')} className={`${unit==='g'?'text-yellow-600 underline':'text-gray-300'}`}>公克</button>
-                            <button onClick={()=>setUnit('kg')} className={`${unit==='kg'?'text-yellow-600 underline':'text-gray-300'}`}>公斤</button>
-                        </div>
-                    </div>
-                    <div className="flex items-end gap-2">
-                        <input type="number" value={weightInput} onChange={e => setWeightInput(e.target.value)} placeholder="0.00" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
-                        <span className="mb-2 text-sm font-bold text-gray-400">{unit === 'tw_qian' ? '錢' : (unit === 'g' ? '克' : '公斤')}</span>
-                    </div>
-                </div>
-                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
-                    <label className="text-xs font-bold text-gray-400 block mb-1">購買總金額 (台幣)</label>
-                    <input type="number" value={totalCost} onChange={e => setTotalCost(e.target.value)} placeholder="0" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-gray-50 p-2 rounded-xl">
-                        <label className="text-[10px] text-gray-400 block mb-1">購買管道</label>
-                        <input type="text" value={channel} onChange={e => setChannel(e.target.value)} placeholder="例: 銀行、銀樓" className="bg-transparent w-full text-sm font-bold outline-none" />
-                    </div>
-                    <div className="bg-gray-50 p-2 rounded-xl">
-                        <label className="text-[10px] text-gray-400 block mb-1">備註</label>
-                        <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="例: 生日禮物" className="bg-transparent w-full text-sm font-bold outline-none" />
-                    </div>
-                </div>
-                <label className="block w-full h-24 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 relative overflow-hidden">
-                    {photo ? (
-                        <>
-                            <img src={photo} className="absolute inset-0 w-full h-full object-cover opacity-50" />
-                            <div className="relative z-10 bg-black/50 text-white px-3 py-1 rounded-full text-xs">更換照片</div>
-                        </>
-                    ) : (
-                        <>
-                            <Camera size={24} />
-                            <span className="text-xs mt-1">上傳證明/照片</span>
-                        </>
-                    )}
-                    <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
-                </label>
-                <button onClick={handleSubmit} disabled={!weightInput || !totalCost} className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform">
-                    {initialData ? '儲存變更' : '確認入庫'}
-                </button>
-            </div>
-        </ModalLayout>
-    );
-};
 
 const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay, readOnly }) => {
   const debt = useMemo(() => {
@@ -1397,17 +611,260 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
   </div>
 );
 
-const ModalLayout = ({ title, onClose, children }) => (
-  <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="bg-white w-full sm:max-w-md h-auto max-h-[90vh] sm:rounded-3xl rounded-t-3xl shadow-2xl flex flex-col overflow-hidden animate-[slideUp_0.3s_ease-out]">
-      <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
-        <h2 className="text-base font-bold text-gray-800">{title}</h2>
-        <button onClick={onClose} className="bg-gray-50 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={18} /></button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 hide-scrollbar">{children}</div>
-    </div>
-  </div>
-);
+const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
+    // Filter transactions by current user
+    const myTransactions = transactions.filter(t => t.owner === role);
+    
+    // Calculations based on "My" gold
+    const totalWeightGrams = myTransactions.reduce((acc, t) => acc + (Number(t.weight) || 0), 0);
+    const totalCost = myTransactions.reduce((acc, t) => acc + (Number(t.totalCost) || 0), 0);
+    const currentValue = totalWeightGrams * goldPrice;
+    const profit = currentValue - totalCost;
+    const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
+
+    return (
+        <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+            {/* Header / Main Card */}
+            <div className={`p-6 rounded-3xl shadow-lg text-white relative overflow-hidden ${role === 'bf' ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-gradient-to-br from-pink-500 to-rose-600'}`}>
+                <div className="absolute top-0 right-0 p-4 opacity-20"><Coins size={80} /></div>
+                <div className="relative z-10">
+                    <div className="flex justify-between items-start">
+                        <div className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
+                            {role === 'bf' ? '👦 男朋友' : '👧 女朋友'} 的黃金總值 (台幣)
+                        </div>
+                        <button onClick={onRefresh} disabled={loading} className={`p-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors ${loading ? 'animate-spin' : ''}`}>
+                            <RefreshCcw size={14} className="text-white"/>
+                        </button>
+                    </div>
+                    <div className="text-3xl font-black mb-4">{formatMoney(currentValue)}</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
+                             <div className="text-white/70 text-[10px] mb-1">持有重量 (台錢)</div>
+                             <div className="text-lg font-bold flex items-end gap-1">
+                                {formatWeight(totalWeightGrams, 'tw_qian')}
+                                <span className="text-[10px] font-normal opacity-70">({formatWeight(totalWeightGrams)})</span>
+                             </div>
+                        </div>
+                        <div className={`rounded-xl p-3 backdrop-blur-sm ${profit >= 0 ? 'bg-green-400/30' : 'bg-red-400/30'}`}>
+                             <div className="text-white/70 text-[10px] mb-1">預估損益</div>
+                             <div className={`text-lg font-bold flex items-center gap-1 ${profit >= 0 ? 'text-green-100' : 'text-red-100'}`}>
+                                {profit >= 0 ? '+' : ''}{formatMoney(profit)}
+                             </div>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between text-xs font-bold text-white/70">
+                         <span>購入成本: {formatMoney(totalCost)}</span>
+                         <span className={profit >= 0 ? 'text-green-100' : 'text-red-100'}>ROI: {roi.toFixed(2)}%</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Chart Section - UPDATED with multiple units */}
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <div className="text-xs text-gray-400 font-bold flex items-center gap-1 mb-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                            台銀賣出金價
+                        </div>
+                        <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
+                            {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
+                        </div>
+                        
+                        {/* 新增：多單位價格顯示 */}
+                        <div className="flex flex-wrap gap-2 mt-2">
+                            <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-100 px-2 py-1 rounded-lg">
+                                <Scale size={10} className="text-yellow-600"/>
+                                <span className="text-[10px] font-bold text-yellow-700">
+                                    {formatMoney(goldPrice * 3.75)} /台錢
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
+                                <span className="text-[10px] font-bold text-gray-600">
+                                    {formatMoney(goldPrice * 1000)} /公斤
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
+                        {['1d', '5d', '3m'].map(p => (
+                            <button key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
+                                {p === '1d' ? '即時' : (p === '5d' ? '近五日' : '近三月')}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                
+                <GoldChart data={history} intraday={intraday} period={period} loading={loading} />
+                {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
+            </div>
+
+            {/* Action Button */}
+            <button onClick={onAdd} className="w-full bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                <Plus size={20} />
+                <span className="font-bold">記一筆黃金</span>
+            </button>
+
+            {/* Transaction List */}
+            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
+                    <History size={16} className="text-gray-400"/>
+                    <h3 className="font-bold text-gray-700">{role === 'bf' ? '男友' : '女友'}的黃金存摺</h3>
+                </div>
+                <div className="divide-y divide-gray-100">
+                    {myTransactions.length === 0 ? (
+                        <div className="p-8 text-center text-gray-400 text-sm">還沒有黃金紀錄</div>
+                    ) : (
+                        myTransactions.map(t => {
+                            const itemValue = (Number(t.weight) || 0) * goldPrice;
+                            const itemProfit = itemValue - Number(t.totalCost);
+                            const itemRoi = t.totalCost > 0 ? (itemProfit / t.totalCost) * 100 : 0;
+
+                            return (
+                                <div key={t.id} onClick={() => onEdit(t)} className="p-4 flex items-start justify-between hover:bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer">
+                                    <div className="flex gap-3">
+                                        {t.photo ? (
+                                            <img src={t.photo} alt="receipt" className="w-12 h-12 rounded-xl object-cover border border-gray-200" />
+                                        ) : (
+                                            <div className="w-12 h-12 rounded-xl bg-yellow-100 text-yellow-600 flex items-center justify-center">
+                                                <Tag size={20} />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <div className="font-bold text-gray-800 flex items-center gap-2">
+                                                {formatWeight(t.weight, 'tw_qian')}
+                                                {t.note && <span className="text-xs font-normal text-gray-400">({t.note})</span>}
+                                            </div>
+                                            <div className="text-xs text-gray-400 flex gap-2 mt-0.5">
+                                                <span>{t.date}</span>
+                                                {t.channel && <span>• {t.channel}</span>}
+                                            </div>
+                                            <div className="text-[10px] text-gray-400 mt-1">成本 {formatMoney(t.totalCost)}</div>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className={`font-bold text-sm ${itemProfit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                            {itemProfit >= 0 ? '+' : ''}{formatMoney(itemProfit)}
+                                        </div>
+                                        <div className={`text-[10px] font-bold ${itemProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                            {itemRoi.toFixed(1)}%
+                                        </div>
+                                        <button onClick={(e) => { e.stopPropagation(); onDelete(t.id); }} className="mt-2 text-gray-300 hover:text-red-400 p-1">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
+    const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
+    const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'kg'
+    const [weightInput, setWeightInput] = useState(initialData ? (initialData.weight).toString() : '');
+    const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() || '');
+    const [channel, setChannel] = useState(initialData?.channel || '');
+    const [note, setNote] = useState(initialData?.note || '');
+    const [photo, setPhoto] = useState(initialData?.photo || null);
+    const [owner, setOwner] = useState(initialData?.owner || role);
+
+    const handlePhoto = async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const compressed = await compressImage(reader.result);
+                setPhoto(compressed);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleSubmit = () => {
+        if (!weightInput || !totalCost) return;
+        
+        let weightInGrams = Number(weightInput);
+        if (unit === 'tw_qian') weightInGrams = weightInGrams * 3.75;
+        if (unit === 'kg') weightInGrams = weightInGrams * 1000;
+
+        onSave({
+            date,
+            weight: weightInGrams,
+            totalCost,
+            channel,
+            note,
+            photo,
+            owner
+        });
+    };
+
+    return (
+        <ModalLayout title={initialData ? "編輯黃金" : "記一筆黃金"} onClose={onClose}>
+            <div className="space-y-4 pt-2">
+                <div className="flex gap-2">
+                    <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-gray-50 rounded-xl px-3 py-2 text-sm font-bold outline-none" />
+                    <div className="flex bg-gray-100 rounded-lg p-1 flex-1">
+                        <button onClick={() => setOwner('bf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'bf' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}>男友</button>
+                        <button onClick={() => setOwner('gf')} className={`flex-1 rounded-md text-xs font-bold ${owner === 'gf' ? 'bg-pink-500 text-white' : 'text-gray-500'}`}>女友</button>
+                    </div>
+                </div>
+                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
+                    <div className="flex justify-between mb-2">
+                        <label className="text-xs font-bold text-gray-400">重量</label>
+                        <div className="flex gap-2 text-xs font-bold">
+                            <button onClick={()=>setUnit('tw_qian')} className={`${unit==='tw_qian'?'text-yellow-600 underline':'text-gray-300'}`}>台錢</button>
+                            <button onClick={()=>setUnit('g')} className={`${unit==='g'?'text-yellow-600 underline':'text-gray-300'}`}>公克</button>
+                            <button onClick={()=>setUnit('kg')} className={`${unit==='kg'?'text-yellow-600 underline':'text-gray-300'}`}>公斤</button>
+                        </div>
+                    </div>
+                    <div className="flex items-end gap-2">
+                        <input type="number" value={weightInput} onChange={e => setWeightInput(e.target.value)} placeholder="0.00" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
+                        <span className="mb-2 text-sm font-bold text-gray-400">{unit === 'tw_qian' ? '錢' : (unit === 'g' ? '克' : '公斤')}</span>
+                    </div>
+                </div>
+                <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
+                    <label className="text-xs font-bold text-gray-400 block mb-1">購買總金額 (台幣)</label>
+                    <input type="number" value={totalCost} onChange={e => setTotalCost(e.target.value)} placeholder="0" className="bg-transparent text-3xl font-black text-gray-800 w-full outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-gray-50 p-2 rounded-xl">
+                        <label className="text-[10px] text-gray-400 block mb-1">購買管道</label>
+                        <input type="text" value={channel} onChange={e => setChannel(e.target.value)} placeholder="例: 銀行、銀樓" className="bg-transparent w-full text-sm font-bold outline-none" />
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded-xl">
+                        <label className="text-[10px] text-gray-400 block mb-1">備註</label>
+                        <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="例: 生日禮物" className="bg-transparent w-full text-sm font-bold outline-none" />
+                    </div>
+                </div>
+                <label className="block w-full h-24 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 relative overflow-hidden">
+                    {photo ? (
+                        <>
+                            <img src={photo} className="absolute inset-0 w-full h-full object-cover opacity-50" />
+                            <div className="relative z-10 bg-black/50 text-white px-3 py-1 rounded-full text-xs">更換照片</div>
+                        </>
+                    ) : (
+                        <>
+                            <Camera size={24} />
+                            <span className="text-xs mt-1">上傳證明/照片</span>
+                        </>
+                    )}
+                    <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+                </label>
+                <button onClick={handleSubmit} disabled={!weightInput || !totalCost} className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-transform">
+                    {initialData ? '儲存變更' : '確認入庫'}
+                </button>
+            </div>
+        </ModalLayout>
+    );
+};
 
 const BookManagerModal = ({ onClose, onSave, onDelete, initialData }) => {
     const [name, setName] = useState(initialData?.name || '');
@@ -1544,3 +1001,576 @@ const RepaymentModal = ({ debt, onClose, onSave }) => {
         </ModalLayout>
     );
 };
+
+// --- Main App Component ---
+export default function App() {
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState(null); 
+  const [activeTab, setActiveTab] = useState('overview');
+
+  const [transactions, setTransactions] = useState([]);
+  const [jars, setJars] = useState([]);
+  const [books, setBooks] = useState([]);
+  const [goldTransactions, setGoldTransactions] = useState([]);
+  
+  const [activeBookId, setActiveBookId] = useState(null);
+  const [viewArchived, setViewArchived] = useState(false);
+
+  const [showAddTransaction, setShowAddTransaction] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState(null); 
+  const [showAddJar, setShowAddJar] = useState(false);
+  const [editingJar, setEditingJar] = useState(null); 
+  const [showJarDeposit, setShowJarDeposit] = useState(null);
+  const [showJarHistory, setShowJarHistory] = useState(null); 
+  const [repaymentDebt, setRepaymentDebt] = useState(null);
+  const [showRoulette, setShowRoulette] = useState(false);
+  const [showAddGold, setShowAddGold] = useState(false);
+  const [editingGold, setEditingGold] = useState(null);
+    
+  const [showBookManager, setShowBookManager] = useState(false);
+  const [editingBook, setEditingBook] = useState(null);
+  const [showScanner, setShowScanner] = useState(false);
+    
+  const [toast, setToast] = useState(null); 
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false });
+
+  // Gold Data State
+  const [goldPrice, setGoldPrice] = useState(0); 
+  const [goldHistory, setGoldHistory] = useState([]);
+  const [goldIntraday, setGoldIntraday] = useState([]); 
+  const [goldPeriod, setGoldPeriod] = useState('1d'); // 1d, 5d, 3m
+  const [goldLoading, setGoldLoading] = useState(false);
+  const [goldError, setGoldError] = useState(null);
+
+  useEffect(() => {
+    if (!document.querySelector('script[src*="tailwindcss"]')) {
+      const script = document.createElement('script');
+      script.src = "https://cdn.tailwindcss.com";
+      document.head.appendChild(script);
+    }
+    const timer = setTimeout(() => setLoading(false), 2000);
+    const initAuth = async () => { 
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            try { 
+                await signInWithCustomToken(auth, __initial_auth_token); 
+            } catch(e) { 
+                console.warn("Custom token failed, attempting anonymous sign-in:", e);
+                try { await signInAnonymously(auth); } catch (e2) { console.error("Anonymous fallback failed:", e2); }
+            }
+        } else {
+            try { await signInAnonymously(auth); } catch (e) { console.error("Anonymous sign-in failed:", e); } 
+        }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    const savedRole = localStorage.getItem('couple_app_role');
+    if (savedRole) setRole(savedRole);
+    return () => { clearTimeout(timer); unsubscribe(); };
+  }, []);
+
+  // Fetch Real Gold Price from Vercel API
+  const fetchGoldPrice = async () => {
+      setGoldLoading(true);
+      setGoldError(null);
+      try {
+          // Use relative path for Vercel API
+          const response = await fetch('/api/gold');
+          
+          if (!response.ok) {
+              throw new Error(`連線錯誤 (${response.status})`);
+          }
+          
+          const data = await response.json();
+          if (data.success) {
+              setGoldPrice(data.currentPrice);
+              setGoldHistory(data.history);
+              setGoldIntraday(data.intraday || []); // 儲存即時走勢
+          } else {
+              throw new Error(data.error || '無法讀取資料');
+          }
+      } catch (err) {
+          console.error("Gold Fetch Error:", err);
+          setGoldError(`台銀連線失敗: ${err.message}`);
+          setGoldPrice(2880); // Fallback
+          setGoldHistory([{date:'-', price: 2880, label: '-'}]);
+      } finally {
+          setGoldLoading(false);
+      }
+  };
+
+  useEffect(() => {
+      // Fetch gold price when app starts or tab changes to gold
+      if (activeTab === 'gold') {
+          fetchGoldPrice();
+      }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!user) return;
+    try {
+        const transRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
+        const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars');
+        const booksRef = collection(db, 'artifacts', appId, 'public', 'data', 'books');
+        const goldRef = collection(db, 'artifacts', appId, 'public', 'data', 'gold_transactions');
+        
+        const unsubBooks = onSnapshot(booksRef, async (s) => {
+            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+            if (data.length === 0 && !s.metadata.hasPendingWrites) {
+               await addDoc(booksRef, { name: "預設帳本", status: 'active', createdAt: serverTimestamp() });
+               return; 
+            }
+            setBooks(data);
+            setActiveBookId(prev => {
+                if (prev && data.find(b => b.id === prev)) return prev;
+                const firstActive = data.find(b => (b.status || 'active') === 'active');
+                if (firstActive) return firstActive.id;
+                return data[0]?.id || null;
+            });
+        });
+
+        const unsubTrans = onSnapshot(transRef, (s) => {
+          const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+          data.sort((a, b) => {
+            const dateA = new Date(a.date).getTime();
+            const dateB = new Date(b.date).getTime();
+            if (dateB !== dateA) return dateB - dateA;
+            return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+          });
+          setTransactions(data);
+        });
+
+        const unsubJars = onSnapshot(jarsRef, (s) => setJars(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0))));
+        
+        const unsubGold = onSnapshot(goldRef, (s) => {
+            const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
+            data.sort((a, b) => new Date(b.date) - new Date(a.date));
+            setGoldTransactions(data);
+        });
+
+        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); };
+    } catch (e) { console.error(e); }
+  }, [user]);
+
+  const filteredTransactions = useMemo(() => {
+      if (!activeBookId) return [];
+      const defaultBookId = books[0]?.id;
+      return transactions.filter(t => {
+          if (t.bookId) return t.bookId === activeBookId;
+          return activeBookId === defaultBookId;
+      });
+  }, [transactions, activeBookId, books]);
+
+  const displayBooks = useMemo(() => {
+      return books.filter(b => {
+          const status = b.status || 'active';
+          return viewArchived ? status === 'archived' : status === 'active';
+      });
+  }, [books, viewArchived]);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  // --- Handlers ---
+  const handleSaveTransaction = async (data) => {
+    if (!user) return;
+    try {
+      const finalAmount = Number(safeCalculate(data.amount));
+      const cleanData = { ...data, amount: finalAmount, bookId: activeBookId }; 
+      if (editingTransaction) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
+        showToast('紀錄已更新 ✨');
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { ...cleanData, createdAt: serverTimestamp() });
+        showToast('紀錄已新增 🎉');
+      }
+      setShowAddTransaction(false);
+      setEditingTransaction(null);
+      setRepaymentDebt(null); 
+    } catch (e) { console.error(e); }
+  };
+
+  const handleSaveGold = async (data) => {
+      if(!user) return;
+      try {
+          const payload = {
+              date: data.date,
+              weight: Number(data.weight), // Stored in grams
+              totalCost: Number(data.totalCost),
+              owner: data.owner, // 'bf' or 'gf'
+              channel: data.channel,
+              note: data.note,
+              photo: data.photo || null,
+              createdAt: serverTimestamp()
+          };
+
+          if (editingGold) {
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gold_transactions', editingGold.id), payload);
+              showToast('黃金紀錄已更新 ✨');
+          } else {
+              await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'gold_transactions'), payload);
+              showToast('黃金已入庫 💰');
+          }
+          setShowAddGold(false);
+          setEditingGold(null);
+      } catch(e) { console.error(e); }
+  };
+
+  const handleDeleteTransaction = (id) => {
+    setConfirmModal({
+      isOpen: true, title: "刪除紀錄", message: "確定要刪除這筆紀錄嗎？", isDanger: true,
+      onConfirm: async () => {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', id));
+        showToast('已刪除 🗑️');
+        setConfirmModal({ isOpen: false });
+      }
+    });
+  };
+  
+  const handleDeleteGold = (id) => {
+      setConfirmModal({
+          isOpen: true, title: "刪除黃金紀錄", message: "確定要刪除這筆紀錄嗎？", isDanger: true,
+          onConfirm: async () => {
+              await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gold_transactions', id));
+              showToast('已刪除 🗑️');
+              setConfirmModal({ isOpen: false });
+          }
+      });
+  };
+
+  const handleSaveJar = async (name, target) => {
+    if (!user) return;
+    try {
+      const finalTarget = Number(safeCalculate(target));
+      if (editingJar) {
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), { name, targetAmount: finalTarget, updatedAt: serverTimestamp() });
+         showToast('存錢罐已更新 ✨');
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), { 
+            name, 
+            targetAmount: finalTarget, 
+            currentAmount: 0, 
+            contributions: { bf: 0, gf: 0 }, 
+            history: [], 
+            createdAt: serverTimestamp() 
+        });
+        showToast('存錢罐已建立 🎯');
+      }
+      setShowAddJar(false);
+      setEditingJar(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteJar = (id) => {
+    setConfirmModal({
+      isOpen: true, title: "刪除目標", message: "確定要打破這個存錢罐嗎？", isDanger: true,
+      onConfirm: async () => {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', id));
+        showToast('已刪除 🗑️');
+        setConfirmModal({ isOpen: false });
+      }
+    });
+  };
+
+  const depositToJar = async (jarId, amount, contributorRole) => {
+    const jar = jars.find(j => j.id === jarId);
+    if (!jar) return;
+    try {
+      const depositAmount = Number(safeCalculate(amount));
+      const newAmount = (jar.currentAmount || 0) + depositAmount;
+      
+      const newContrib = { ...jar.contributions };
+      if (contributorRole === 'both') {
+          const half = depositAmount / 2;
+          newContrib.bf = (newContrib.bf || 0) + half;
+          newContrib.gf = (newContrib.gf || 0) + half;
+      } else {
+          newContrib[contributorRole] = (newContrib[contributorRole] || 0) + depositAmount;
+      }
+      
+      const newHistoryItem = {
+          id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+          amount: depositAmount,
+          role: contributorRole, 
+          date: new Date().toISOString()
+      };
+      const newHistory = [newHistoryItem, ...(jar.history || [])];
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jarId), { 
+          currentAmount: newAmount, 
+          contributions: newContrib, 
+          history: newHistory
+      });
+      setShowJarDeposit(null);
+      showToast(`已存入 $${depositAmount} 💰`);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleUpdateJarHistoryItem = async (jar, oldItem, newAmount) => {
+    try {
+        const diff = Number(newAmount) - oldItem.amount;
+        const newTotal = (jar.currentAmount || 0) + diff;
+        const newContrib = { ...jar.contributions };
+        if (oldItem.role === 'both') {
+            const halfDiff = diff / 2;
+            newContrib.bf = (newContrib.bf || 0) + halfDiff;
+            newContrib.gf = (newContrib.gf || 0) + halfDiff;
+        } else {
+            newContrib[oldItem.role] = (newContrib[oldItem.role] || 0) + diff;
+        }
+        const newHistory = (jar.history || []).map(item => item.id === oldItem.id ? { ...item, amount: Number(newAmount) } : item);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
+        showToast('紀錄已修正 ✨');
+    } catch(e) { console.error(e); }
+  };
+
+  const handleDeleteJarHistoryItem = async (jar, item) => {
+    setConfirmModal({
+        isOpen: true, title: "刪除存錢紀錄", message: "確定要刪除這筆存款嗎？", isDanger: true,
+        onConfirm: async () => {
+            try {
+                const newTotal = (jar.currentAmount || 0) - item.amount;
+                const newContrib = { ...jar.contributions };
+                if (item.role === 'both') {
+                    const half = item.amount / 2;
+                    newContrib.bf = Math.max(0, (newContrib.bf || 0) - half);
+                    newContrib.gf = Math.max(0, (newContrib.gf || 0) - half);
+                } else {
+                    newContrib[item.role] = Math.max(0, (newContrib[item.role] || 0) - item.amount);
+                }
+                const newHistory = (jar.history || []).filter(h => h.id !== item.id);
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), { currentAmount: newTotal, contributions: newContrib, history: newHistory });
+                showToast('紀錄已刪除 🗑️');
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            } catch(e) { console.error(e); }
+        }
+    });
+  };
+
+  const handleSaveBook = async (name, status = 'active') => {
+      if(!user || !name.trim()) return;
+      try {
+          if(editingBook) {
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', editingBook.id), {
+                  name, status, updatedAt: serverTimestamp()
+              });
+              showToast('帳本已更新 ✨');
+          } else {
+              const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'books'), {
+                  name, status, createdAt: serverTimestamp()
+              });
+              setActiveBookId(docRef.id); 
+              showToast('新帳本已建立 📘');
+          }
+          setShowBookManager(false);
+          setEditingBook(null);
+      } catch(e) { console.error(e); }
+  };
+
+  const handleDeleteBook = async (bookId) => {
+      if(books.filter(b => (b.status||'active') === 'active').length <= 1 && editingBook?.status !== 'archived') {
+          showToast('至少需要保留一個使用中的帳本 ⚠️');
+          return;
+      }
+      setConfirmModal({
+        isOpen: true, title: "刪除帳本", message: "確定要永久刪除這個帳本嗎？裡面的記帳紀錄也會一併刪除！(無法復原)", isDanger: true,
+        onConfirm: async () => {
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'books', bookId));
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), where("bookId", "==", bookId));
+                const snap = await getDocs(q);
+                const batch = writeBatch(db);
+                snap.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                if(activeBookId === bookId) {
+                    const remaining = books.filter(b => b.id !== bookId && (b.status||'active') === 'active');
+                    if(remaining.length > 0) setActiveBookId(remaining[0].id);
+                }
+                showToast('帳本已刪除 🗑️');
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+            } catch(e) { console.error(e); }
+        }
+      });
+  };
+
+  const handleScanComplete = (scannedItem) => {
+      setEditingTransaction({
+          amount: scannedItem.amount,
+          note: scannedItem.note,
+          category: scannedItem.category,
+          date: scannedItem.date || new Date().toISOString().split('T')[0],
+      });
+      setShowScanner(false);
+      setShowAddTransaction(true);
+  };
+
+  if (loading) return <AppLoading />;
+  if (!role) return <RoleSelection onSelect={(r) => { setRole(r); localStorage.setItem('couple_app_role', r); }} />;
+
+  return (
+    <div className="min-h-screen w-full bg-gray-50 font-sans text-gray-800 pb-24">
+      <style>{`.hide-scrollbar::-webkit-scrollbar { display: none; }`}</style>
+      <div className={`p-4 text-white shadow-lg sticky top-0 z-40 transition-colors ${role === 'bf' ? 'bg-blue-600' : 'bg-pink-500'}`}>
+        <div className="flex justify-between items-center max-w-2xl mx-auto">
+          <div className="flex items-center gap-2">
+            <div className="bg-white/20 p-2 rounded-full backdrop-blur-md"><Heart className="fill-white animate-pulse" size={18} /></div>
+            <h1 className="text-lg font-bold tracking-wide">我們的小金庫</h1>
+          </div>
+          <div className="flex items-center gap-3">
+              {activeTab === 'overview' && (
+                  <button 
+                    onClick={() => setViewArchived(!viewArchived)}
+                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${viewArchived ? 'bg-white text-gray-800 border-white' : 'bg-transparent text-white/80 border-white/30'}`}
+                  >
+                      {viewArchived ? <Archive size={12}/> : <Book size={12}/>}
+                      {viewArchived ? '歷史' : '使用中'}
+                  </button>
+              )}
+              <div className="text-xs bg-black/10 px-3 py-1 rounded-full">{role === 'bf' ? '👦 男朋友' : '👧 女朋友'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-2xl mx-auto p-4">
+        {activeTab === 'overview' && (
+             <div className="mb-4">
+                 {viewArchived && <div className="text-xs text-gray-400 mb-2 font-bold flex items-center gap-1"><Archive size={12}/> 歷史封存區 (唯讀模式)</div>}
+                 <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1">
+                     {displayBooks.map(book => (
+                         <button 
+                           key={book.id} 
+                           onClick={() => setActiveBookId(book.id)}
+                           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all shadow-sm ${activeBookId === book.id ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+                         >
+                             <Book size={14} />
+                             {book.name}
+                             {activeBookId === book.id && (
+                                 <div onClick={(e) => { e.stopPropagation(); setEditingBook(book); setShowBookManager(true); }} className="ml-1 p-1 rounded-full hover:bg-white/20">
+                                     <Settings size={12} />
+                                 </div>
+                             )}
+                         </button>
+                     ))}
+                     {!viewArchived && (
+                         <button onClick={() => { setEditingBook(null); setShowBookManager(true); }} className="px-3 py-2 bg-white text-gray-400 rounded-xl shadow-sm hover:bg-gray-50">
+                             <Plus size={18} />
+                         </button>
+                     )}
+                     {displayBooks.length === 0 && <div className="text-gray-400 text-sm italic py-2">沒有{viewArchived ? '封存' : '使用中'}的帳本</div>}
+                 </div>
+             </div>
+        )}
+        
+        {activeTab === 'overview' && (
+            <Overview 
+                transactions={filteredTransactions} 
+                role={role} 
+                readOnly={viewArchived}
+                onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} 
+                onScan={() => setShowScanner(true)}
+                onEdit={(t) => { 
+                    if(viewArchived) return; 
+                    setEditingTransaction(t); 
+                    setShowAddTransaction(true); 
+                }} 
+                onDelete={(id) => {
+                    if(viewArchived) return;
+                    handleDeleteTransaction(id);
+                }} 
+                onRepay={(debt) => setRepaymentDebt(debt)}
+            />
+        )}
+
+        {activeTab === 'stats' && (
+            <div>
+                <div className="bg-white px-4 py-2 rounded-xl shadow-sm mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600">
+                    <Book size={14}/> 統計範圍: {books.find(b => b.id === activeBookId)?.name || '未知帳本'}
+                </div>
+                <Statistics transactions={filteredTransactions} />
+            </div>
+        )}
+        {activeTab === 'savings' && (
+            <Savings 
+                jars={jars} 
+                role={role} 
+                onAdd={() => { setEditingJar(null); setShowAddJar(true); }} 
+                onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} 
+                onDeposit={(id) => setShowJarDeposit(id)} 
+                onDelete={handleDeleteJar} 
+                onHistory={(j) => setShowJarHistory(j)} 
+                onOpenRoulette={() => setShowRoulette(true)}
+            />
+        )}
+        {activeTab === 'gold' && (
+            <GoldView 
+                transactions={goldTransactions}
+                goldPrice={goldPrice}
+                history={goldHistory}
+                period={goldPeriod}
+                setPeriod={setGoldPeriod}
+                role={role}
+                onAdd={() => { setEditingGold(null); setShowAddGold(true); }}
+                onEdit={(t) => { setEditingGold(t); setShowAddGold(true); }}
+                onDelete={handleDeleteGold}
+                loading={goldLoading}
+                error={goldError}
+                onRefresh={fetchGoldPrice}
+                intraday={goldIntraday}
+            />
+        )}
+        {activeTab === 'settings' && <SettingsView role={role} onLogout={() => { localStorage.removeItem('couple_app_role'); window.location.reload(); }} />}
+      </div>
+
+      <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50">
+        <div className="flex justify-around py-3 max-w-2xl mx-auto">
+          <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
+          <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
+          <NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
+          <NavBtn icon={Coins} label="黃金" active={activeTab === 'gold'} onClick={() => setActiveTab('gold')} role={role} />
+          <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
+        </div>
+      </div>
+
+      {toast && <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-xl z-[100] flex items-center gap-3 animate-[fadeIn_0.3s_ease-out]"><CheckCircle size={18} className="text-green-400" /><span className="text-sm font-medium">{toast}</span></div>}
+
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) setConfirmModal(prev => ({ ...prev, isOpen: false })); }}>
+          <div className="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl">
+            <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
+            <p className="text-gray-500 text-sm mb-6">{confirmModal.message}</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmModal({ isOpen: false })} className="flex-1 py-3 bg-gray-100 rounded-xl text-sm font-bold text-gray-600">取消</button>
+              <button onClick={confirmModal.onConfirm} className={`flex-1 py-3 rounded-xl text-sm font-bold text-white ${confirmModal.isDanger ? 'bg-red-500' : 'bg-blue-500'}`}>確定</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
+      {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} />}
+      {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
+      {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
+      {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
+      {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} currentPrice={goldPrice} initialData={editingGold} role={role} />}
+      
+      {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
+
+      {repaymentDebt !== null && (
+          <RepaymentModal 
+              debt={repaymentDebt} 
+              onClose={() => setRepaymentDebt(null)} 
+              onSave={handleSaveTransaction}
+          />
+      )}
+
+      {showBookManager && (
+          <BookManagerModal 
+            onClose={() => setShowBookManager(false)} 
+            onSave={handleSaveBook} 
+            onDelete={handleDeleteBook}
+            initialData={editingBook}
+          />
+      )}
+    </div>
+  );
+}
