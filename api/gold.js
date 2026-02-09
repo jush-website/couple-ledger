@@ -12,87 +12,118 @@ export default async function handler(req, res) {
     let currentPrice = 0;
     let history = [];
     
-    // --- 階段一：嘗試從 HTML 網頁直接抓取「即時金價」 (最穩定) ---
-    // 說明: 台銀可能會擋 CSV 下載，但通常不會擋一般網頁瀏覽
+    // --- 階段一：嘗試從 HTML 網頁直接抓取「台銀即時金價」 (最準確) ---
     try {
         const htmlResponse = await fetch('https://rate.bot.com.tw/gold?Lang=zh-TW', { headers });
         if (htmlResponse.ok) {
             const html = await htmlResponse.text();
-            
-            // 使用 Regex (正規表達式) 在 HTML 原始碼中尋找價格
-            // 尋找包含 "1 公克" 的那一列
             const gramRowMatch = html.match(/1\s*公克.*?<\/tr>/s);
-            
             if (gramRowMatch) {
                 const rowHtml = gramRowMatch[0];
-                // 在這一列中尋找所有的數字欄位 (>2,880<)
-                // 台銀表格順序通常是: 買進, 賣出 (我們需要賣出，即第二個數字)
                 const prices = rowHtml.match(/>([0-9,]+)<\/td>/g);
-                
                 if (prices && prices.length >= 2) {
-                    // 移除 HTML 標籤和逗號，轉成數字
                     const rawPrice = prices[1].replace(/<[^>]+>/g, '').replace(/,/g, '');
                     currentPrice = parseFloat(rawPrice);
                 }
             }
         }
     } catch (e) {
-        console.error("HTML Scraping failed:", e);
+        console.warn("HTML Scraping failed:", e.message);
     }
 
     // --- 階段二：嘗試從 CSV 抓取「歷史走勢」 ---
-    try {
-      const csvResponse = await fetch('https://rate.bot.com.tw/gold/csv/0', { headers });
-      
-      if (csvResponse.ok) {
-          const csvText = await csvResponse.text();
-          const rows = csvText.split('\n').filter(row => row.trim() !== '');
-          const dataRows = rows.slice(1); 
+    if (currentPrice > 0) {
+        // 只有在 HTML 成功時才嘗試抓 CSV 補歷史，不然直接跳到備援方案
+        try {
+            const csvResponse = await fetch('https://rate.bot.com.tw/gold/csv/0', { headers });
+            if (csvResponse.ok) {
+                const csvText = await csvResponse.text();
+                const rows = csvText.split('\n').filter(row => row.trim() !== '');
+                const dataRows = rows.slice(1); 
+                const parsedHistory = dataRows.map(row => {
+                    const columns = row.split(',');
+                    if (columns.length < 4) return null;
+                    const dateStr = columns[0].trim(); 
+                    const price = parseFloat(columns[3]); 
+                    if (!dateStr || isNaN(price) || dateStr.length < 8) return null;
+                    const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+                    return {
+                        date: formattedDate,
+                        price: price,
+                        label: `${dateStr.substring(4, 6)}/${dateStr.substring(6, 8)}`
+                    };
+                }).filter(item => item !== null);
 
-          const parsedHistory = dataRows.map(row => {
-            const columns = row.split(',');
-            if (columns.length < 4) return null;
-            const dateStr = columns[0].trim(); 
-            const price = parseFloat(columns[3]); 
-            
-            if (!dateStr || isNaN(price)) return null;
-            if (dateStr.length < 8) return null;
-            
-            const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
-            return {
-              date: formattedDate,
-              price: price,
-              label: `${dateStr.substring(4, 6)}/${dateStr.substring(6, 8)}`
-            };
-          }).filter(item => item !== null);
-
-          if (parsedHistory.length > 0) {
-              history = parsedHistory.reverse();
-              // 如果剛剛 HTML 沒抓到，就用 CSV 最新的價格當作目前價格
-              if (!currentPrice && history.length > 0) {
-                  currentPrice = history[history.length - 1].price;
-              }
-          }
-      }
-    } catch (e) {
-        console.warn("CSV Fetch failed:", e);
-        // CSV 失敗是可以接受的，只要 HTML 成功，至少能顯示目前價格
+                if (parsedHistory.length > 0) {
+                    history = parsedHistory.reverse();
+                }
+            }
+        } catch (e) {
+            console.warn("CSV Fetch failed:", e.message);
+        }
     }
 
-    // --- 最終檢查與資料補救 ---
+    // --- 階段三：備援方案 (Yahoo Finance 國際金價換算) ---
+    // 如果台銀完全抓不到資料 (HTML & CSV 都失敗)，改用國際金價換算
     if (!currentPrice && history.length === 0) {
-        throw new Error('All data sources failed (HTML & CSV)');
+        console.log("Switching to Strategy 3: Yahoo Finance Fallback");
+        try {
+            // 1. 抓取黃金期貨價格 (USD/盎司)
+            // range=1mo (一個月)
+            const goldRes = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=1mo', { headers });
+            // 2. 抓取匯率 (USD/TWD)
+            const twdRes = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/TWD=X?interval=1d&range=1d', { headers });
+
+            if (goldRes.ok && twdRes.ok) {
+                const goldData = await goldRes.json();
+                const twdData = await twdRes.json();
+
+                const goldQuote = goldData.chart.result[0];
+                const twdQuote = twdData.chart.result[0];
+
+                const currentGoldUsd = goldQuote.meta.regularMarketPrice;
+                const currentTwdRate = twdQuote.meta.regularMarketPrice;
+                const ozToGram = 31.1034768;
+
+                // 計算每克台幣價格 (含一些溢價緩衝，台銀賣出價通常比國際盤高一點，這裡加 1% 讓感覺更真實)
+                const premium = 1.01; 
+                currentPrice = Math.floor(((currentGoldUsd * currentTwdRate) / ozToGram) * premium);
+
+                // 建構歷史資料
+                const timestamps = goldQuote.timestamp;
+                const prices = goldQuote.indicators.quote[0].close;
+                
+                if (timestamps && prices) {
+                    history = timestamps.map((ts, i) => {
+                        if (!prices[i]) return null;
+                        // 使用當下匯率估算歷史價格 (雖不精確但足夠顯示趨勢)
+                        const priceTwd = Math.floor(((prices[i] * currentTwdRate) / ozToGram) * premium);
+                        const dateObj = new Date(ts * 1000);
+                        return {
+                            date: dateObj.toISOString().split('T')[0],
+                            price: priceTwd,
+                            label: `${dateObj.getMonth() + 1}/${dateObj.getDate()}`
+                        };
+                    }).filter(x => x !== null);
+                }
+            }
+        } catch (e) {
+            console.error("Yahoo Finance Fallback failed:", e.message);
+        }
     }
 
-    // 如果只有抓到目前價格 (HTML 成功)，但沒抓到歷史 (CSV 失敗)
-    // 我們手動建立一個只有「今日」的歷史資料，避免前端圖表壞掉
-    if (history.length === 0 && currentPrice) {
+    // --- 最終檢查 ---
+    if (!currentPrice) {
+        throw new Error('All data sources failed (HTML, CSV, and Yahoo)');
+    }
+
+    // 如果有價格但沒歷史 (例如 Yahoo 抓歷史失敗)，補一個單點
+    if (history.length === 0) {
         const today = new Date();
-        const dateStr = `${today.getMonth() + 1}/${today.getDate()}`;
         history = [{ 
             date: today.toISOString().split('T')[0], 
             price: currentPrice, 
-            label: dateStr 
+            label: `${today.getMonth() + 1}/${today.getDate()}` 
         }];
     }
 
@@ -107,7 +138,7 @@ export default async function handler(req, res) {
     res.status(500).json({ 
       success: false, 
       error: error.message || "Unknown error",
-      currentPrice: 2880, // 最後的 fallback
+      currentPrice: 2880, 
       history: []
     });
   }
