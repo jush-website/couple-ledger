@@ -33,7 +33,6 @@ export default async function handler(req, res) {
 
     // --- 階段二：嘗試從 CSV 抓取「歷史走勢」 ---
     if (currentPrice > 0) {
-        // 只有在 HTML 成功時才嘗試抓 CSV 補歷史，不然直接跳到備援方案
         try {
             const csvResponse = await fetch('https://rate.bot.com.tw/gold/csv/0', { headers });
             if (csvResponse.ok) {
@@ -64,14 +63,13 @@ export default async function handler(req, res) {
     }
 
     // --- 階段三：備援方案 (Yahoo Finance 國際金價換算) ---
-    // 如果台銀完全抓不到資料 (HTML & CSV 都失敗)，改用國際金價換算
-    if (!currentPrice && history.length === 0) {
-        console.log("Switching to Strategy 3: Yahoo Finance Fallback");
+    // 如果需要補足歷史資料 (CSV 可能只有一個月) 或台銀失敗，使用 Yahoo
+    // 這裡我們強制檢查歷史資料長度，如果不夠長(少於 60 天)，就嘗試用 Yahoo 補完
+    if (!currentPrice || history.length < 60) {
+        console.log("Fetching Strategy 3: Yahoo Finance (for history extension)");
         try {
-            // 1. 抓取黃金期貨價格 (USD/盎司)
-            // range=1mo (一個月)
-            const goldRes = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=1mo', { headers });
-            // 2. 抓取匯率 (USD/TWD)
+            // 改為 range=3mo 以支援三個月圖表
+            const goldRes = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=3mo', { headers });
             const twdRes = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/TWD=X?interval=1d&range=1d', { headers });
 
             if (goldRes.ok && twdRes.ok) {
@@ -81,30 +79,36 @@ export default async function handler(req, res) {
                 const goldQuote = goldData.chart.result[0];
                 const twdQuote = twdData.chart.result[0];
 
-                const currentGoldUsd = goldQuote.meta.regularMarketPrice;
                 const currentTwdRate = twdQuote.meta.regularMarketPrice;
                 const ozToGram = 31.1034768;
-
-                // 計算每克台幣價格 (含一些溢價緩衝，台銀賣出價通常比國際盤高一點，這裡加 1% 讓感覺更真實)
                 const premium = 1.01; 
-                currentPrice = Math.floor(((currentGoldUsd * currentTwdRate) / ozToGram) * premium);
 
-                // 建構歷史資料
-                const timestamps = goldQuote.timestamp;
-                const prices = goldQuote.indicators.quote[0].close;
-                
-                if (timestamps && prices) {
-                    history = timestamps.map((ts, i) => {
-                        if (!prices[i]) return null;
-                        // 使用當下匯率估算歷史價格 (雖不精確但足夠顯示趨勢)
-                        const priceTwd = Math.floor(((prices[i] * currentTwdRate) / ozToGram) * premium);
-                        const dateObj = new Date(ts * 1000);
-                        return {
-                            date: dateObj.toISOString().split('T')[0],
-                            price: priceTwd,
-                            label: `${dateObj.getMonth() + 1}/${dateObj.getDate()}`
-                        };
-                    }).filter(x => x !== null);
+                // 如果還沒有即時價格，才用 Yahoo 計算
+                if (!currentPrice) {
+                    const currentGoldUsd = goldQuote.meta.regularMarketPrice;
+                    currentPrice = Math.floor(((currentGoldUsd * currentTwdRate) / ozToGram) * premium);
+                }
+
+                // 如果 CSV 歷史資料不足，使用 Yahoo 的資料
+                if (history.length < 60) {
+                    const timestamps = goldQuote.timestamp;
+                    const prices = goldQuote.indicators.quote[0].close;
+                    
+                    if (timestamps && prices) {
+                        history = timestamps.map((ts, i) => {
+                            if (!prices[i]) return null;
+                            const priceTwd = Math.floor(((prices[i] * currentTwdRate) / ozToGram) * premium);
+                            const dateObj = new Date(ts * 1000);
+                            const m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+                            const d = dateObj.getDate().toString().padStart(2, '0');
+                            
+                            return {
+                                date: dateObj.toISOString().split('T')[0],
+                                price: priceTwd,
+                                label: `${m}/${d}`
+                            };
+                        }).filter(x => x !== null);
+                    }
                 }
             }
         } catch (e) {
@@ -112,12 +116,10 @@ export default async function handler(req, res) {
         }
     }
 
-    // --- 最終檢查 ---
     if (!currentPrice) {
-        throw new Error('All data sources failed (HTML, CSV, and Yahoo)');
+        throw new Error('All data sources failed');
     }
 
-    // 如果有價格但沒歷史 (例如 Yahoo 抓歷史失敗)，補一個單點
     if (history.length === 0) {
         const today = new Date();
         history = [{ 
