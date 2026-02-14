@@ -1246,13 +1246,13 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
                 onClick={() => setViewType('shared')}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${viewType === 'shared' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
             >
-                <Users size={16}/> 雙人共享
+                <Users size={16}/> 共同
             </button>
             <button 
                 onClick={() => setViewType('personal')}
                 className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${viewType === 'personal' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
             >
-                <User size={16}/> 個人獨享
+                <User size={16}/> 個人
             </button>
         </div>
 
@@ -1316,10 +1316,14 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
                                 
                                 <div className="flex justify-between items-center relative z-10 mb-4">
                                     <div className="flex gap-2">
-                                        <div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
-                                        <div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                                        {!isPersonal && (
+                                            <>
+                                                <div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
+                                                <div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                                            </>
+                                        )}
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 ml-auto">
                                         <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button>
                                         <button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>
                                         <button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button>
@@ -1370,10 +1374,14 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
 
                                 <div className="mt-4 pt-3 border-t border-yellow-100 flex justify-between items-center">
                                     <div className="flex gap-2">
-                                        <div className="flex items-center gap-1 text-xs font-bold text-blue-400"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
-                                        <div className="flex items-center gap-1 text-xs font-bold text-pink-400"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                                        {!isPersonal && (
+                                            <>
+                                                <div className="flex items-center gap-1 text-xs font-bold text-blue-400"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
+                                                <div className="flex items-center gap-1 text-xs font-bold text-pink-400"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                                            </>
+                                        )}
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 ml-auto">
                                         <button onClick={() => onHistory(jar)} className="p-2 bg-white text-gray-400 rounded-lg hover:text-gray-600 shadow-sm"><History size={16}/></button>
                                         <button onClick={() => onDelete(jar.id)} className="p-2 bg-white text-gray-300 hover:text-red-400 rounded-lg shadow-sm"><Trash2 size={16}/></button>
                                     </div>
