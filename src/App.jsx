@@ -31,7 +31,7 @@ const firebaseConfig = {
 
 // --- Helper Functions ---
 const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
-    const apiKey = ""; // Keep empty as per instructions, injected at runtime usually
+    const apiKey = ""; // Keep empty as per instructions
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
     const prompt = `
@@ -333,7 +333,7 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
-// --- Gold Converter Component (New) ---
+// --- Gold Converter Component ---
 const GoldConverter = ({ goldPrice, isVisible, toggleVisibility }) => {
     const [amount, setAmount] = useState('');
     const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'tw_liang', 'kg', 'twd'
@@ -426,8 +426,8 @@ const GoldConverter = ({ goldPrice, isVisible, toggleVisibility }) => {
     );
 };
 
-// --- Gold Chart Component (Enhanced with Interactive Tooltip & Min/Max) ---
-const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibility }) => {
+// --- Gold Chart Component (Redesigned Header + Merged) ---
+const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVisible, toggleVisibility }) => {
     const [hoverData, setHoverData] = useState(null);
     const containerRef = useRef(null);
 
@@ -481,27 +481,6 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
         setHoverData(null);
     };
 
-    if (loading) {
-        return <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs"><Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...</div>;
-    }
-
-    if (!chartData || chartData.length === 0) {
-        return (
-            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 mb-4">
-                 <button onClick={toggleVisibility} className="w-full flex items-center justify-between">
-                     <div className="text-gray-700 font-bold flex items-center gap-2"><BarChart3 size={18}/> 價格走勢</div>
-                     {isVisible ? <ChevronUp size={18} className="text-gray-400"/> : <ChevronDown size={18} className="text-gray-400"/>}
-                 </button>
-                 {isVisible && (
-                    <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 text-xs gap-2 mt-4">
-                        <BarChart3 size={24} className="opacity-50"/>
-                        <span>{period === '1d' ? '今日尚無即時交易數據' : '尚無足夠的歷史數據'}</span>
-                    </div>
-                 )}
-            </div>
-        );
-    }
-
     const prices = chartData.map(d => d.price);
     const minPrice = Math.min(...prices) * 0.999;
     const maxPrice = Math.max(...prices) * 1.001;
@@ -511,102 +490,133 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
     const getX = (index) => (index / (chartData.length - 1)) * 100;
 
     const points = chartData.map((d, i) => `${getX(i)},${getY(d.price)}`).join(' ');
-    const isUp = chartData[chartData.length - 1].price >= chartData[0].price;
+    const isUp = chartData.length > 1 && chartData[chartData.length - 1].price >= chartData[0].price;
 
     return (
-        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300">
-            <div className="p-4 flex items-center justify-between bg-gray-50/50">
-                 <button onClick={toggleVisibility} className="flex-1 flex items-center justify-between">
-                     <div className="text-gray-700 font-bold flex items-center gap-2">
-                         <BarChart3 size={18} className="text-blue-500"/> 
-                         價格走勢 
-                         <span className="text-xs font-normal text-gray-400 ml-2">
-                             (最高: {extremePoints.max ? formatMoney(extremePoints.max.val) : '-'})
-                         </span>
-                     </div>
-                     {isVisible ? <ChevronUp size={18} className="text-gray-400"/> : <ChevronDown size={18} className="text-gray-400"/>}
-                 </button>
-            </div>
-            
-            {isVisible && (
-                <div className="p-5 animate-[fadeIn_0.3s]">
-                    <div className="w-full h-48 relative select-none" 
-                         ref={containerRef}
-                         onMouseMove={handleMouseMove}
-                         onTouchMove={(e) => handleMouseMove(e.touches[0])}
-                         onMouseLeave={handleMouseLeave}
-                         onTouchEnd={handleMouseLeave}
-                    >
-                        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
-                            <defs>
-                                <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0.2" />
-                                    <stop offset="100%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0" />
-                                </linearGradient>
-                            </defs>
-                            <path d={`M0,100 L0,${getY(chartData[0].price)} ${chartData.map((d, i) => `L${getX(i)},${getY(d.price)}`).join(' ')} L100,100 Z`} fill="url(#goldGradient)" />
-                            <polyline points={points} fill="none" stroke={isUp ? "#eab308" : "#22c55e"} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-                            
-                            {/* Extreme Points Markers */}
-                            {extremePoints.max && (
-                                <g>
-                                    <circle cx={getX(extremePoints.max.idx)} cy={getY(extremePoints.max.val)} r="1.5" fill="#ef4444" stroke="white" strokeWidth="0.5"/>
-                                    {/* Only show label if not hovering close to it to avoid clutter */}
-                                    {(!hoverData || Math.abs(hoverData.index - extremePoints.max.idx) > 5) && (
-                                        <text x={getX(extremePoints.max.idx)} y={getY(extremePoints.max.val) - 3} fontSize="3" fill="#ef4444" textAnchor="middle" fontWeight="bold">MAX</text>
-                                    )}
-                                </g>
-                            )}
-                            {extremePoints.min && (
-                                <g>
-                                    <circle cx={getX(extremePoints.min.idx)} cy={getY(extremePoints.min.val)} r="1.5" fill="#22c55e" stroke="white" strokeWidth="0.5"/>
-                                    {(!hoverData || Math.abs(hoverData.index - extremePoints.min.idx) > 5) && (
-                                        <text x={getX(extremePoints.min.idx)} y={getY(extremePoints.min.val) + 6} fontSize="3" fill="#22c55e" textAnchor="middle" fontWeight="bold">MIN</text>
-                                    )}
-                                </g>
-                            )}
-
-                            {/* Hover Indicator */}
-                            {hoverData && (
-                                <g>
-                                    <line 
-                                        x1={hoverData.xPos} y1="0" 
-                                        x2={hoverData.xPos} y2="100" 
-                                        stroke="#9ca3af" strokeWidth="0.5" strokeDasharray="2"
-                                        vectorEffect="non-scaling-stroke"
-                                    />
-                                    <circle 
-                                        cx={hoverData.xPos} 
-                                        cy={getY(hoverData.item.price)} 
-                                        r="2" 
-                                        fill="white" stroke="#3b82f6" strokeWidth="1"
-                                    />
-                                </g>
-                            )}
-                        </svg>
-
-                        {/* HTML Overlay for Tooltip */}
-                        {hoverData && (
-                            <div 
-                                style={{ 
-                                    position: 'absolute', 
-                                    left: `${hoverData.xPos}%`, 
-                                    top: 0,
-                                    transform: `translateX(${hoverData.xPos > 50 ? '-105%' : '5%'})`, // Flip side based on position
-                                    pointerEvents: 'none'
-                                }}
-                                className="bg-gray-900/90 text-white p-2 rounded-lg shadow-xl text-xs z-10 backdrop-blur-sm border border-white/20"
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300 relative group">
+            {/* Header (Integrated Price Info & Toggle) */}
+            <div className="p-5 flex justify-between items-start cursor-pointer hover:bg-gray-50/50 transition-colors" onClick={toggleVisibility}>
+                <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse"></div>
+                        <span className="text-sm font-bold text-gray-400">台銀賣出金價</span>
+                    </div>
+                    <div className="text-3xl font-black text-gray-800 tracking-tight">
+                        {formatMoney(goldPrice)} <span className="text-sm text-gray-400 font-normal">/克</span>
+                    </div>
+                </div>
+                
+                <div className="flex flex-col items-end gap-3">
+                    {/* Period Selector - Stop propagation so clicking buttons doesn't toggle collapse */}
+                    <div className="flex bg-gray-100 rounded-lg p-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {['1d', '10d', '3m'].map(p => (
+                            <button 
+                                type="button" 
+                                key={p} 
+                                onClick={() => setPeriod(p)} 
+                                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
                             >
-                                <div className="font-bold text-yellow-300 mb-0.5">{formatMoney(hoverData.item.price)}</div>
-                                <div className="text-gray-300 text-[10px]">{hoverData.item.date} {hoverData.item.label !== hoverData.item.date ? hoverData.item.label : ''}</div>
-                            </div>
-                        )}
+                                {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
+                            </button>
+                        ))}
                     </div>
+                    {isVisible ? <ChevronUp size={20} className="text-gray-300"/> : <ChevronDown size={20} className="text-gray-300"/>}
+                </div>
+            </div>
+
+            {/* Collapsible Chart Body */}
+            {isVisible && (
+                <div className="px-5 pb-5 animate-[fadeIn_0.3s]">
+                    {loading ? (
+                        <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs">
+                            <Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...
+                        </div>
+                    ) : (!chartData || chartData.length === 0) ? (
+                        <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 text-xs gap-2">
+                            <BarChart3 size={24} className="opacity-50"/>
+                            <span>{period === '1d' ? '今日尚無即時交易數據' : '尚無足夠的歷史數據'}</span>
+                        </div>
+                    ) : (
+                        <div className="w-full h-48 relative select-none mt-2" 
+                             ref={containerRef}
+                             onMouseMove={handleMouseMove}
+                             onTouchMove={(e) => handleMouseMove(e.touches[0])}
+                             onMouseLeave={handleMouseLeave}
+                             onTouchEnd={handleMouseLeave}
+                        >
+                            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+                                <defs>
+                                    <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0.2" />
+                                        <stop offset="100%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0" />
+                                    </linearGradient>
+                                </defs>
+                                <path d={`M0,100 L0,${getY(chartData[0].price)} ${chartData.map((d, i) => `L${getX(i)},${getY(d.price)}`).join(' ')} L100,100 Z`} fill="url(#goldGradient)" />
+                                <polyline points={points} fill="none" stroke={isUp ? "#eab308" : "#22c55e"} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                                
+                                {/* Extreme Points Markers */}
+                                {extremePoints.max && (
+                                    <g>
+                                        <circle cx={getX(extremePoints.max.idx)} cy={getY(extremePoints.max.val)} r="1.5" fill="#ef4444" stroke="white" strokeWidth="0.5"/>
+                                        {(!hoverData || Math.abs(hoverData.index - extremePoints.max.idx) > 5) && (
+                                            <text x={getX(extremePoints.max.idx)} y={getY(extremePoints.max.val) - 3} fontSize="3" fill="#ef4444" textAnchor="middle" fontWeight="bold">MAX</text>
+                                        )}
+                                    </g>
+                                )}
+                                {extremePoints.min && (
+                                    <g>
+                                        <circle cx={getX(extremePoints.min.idx)} cy={getY(extremePoints.min.val)} r="1.5" fill="#22c55e" stroke="white" strokeWidth="0.5"/>
+                                        {(!hoverData || Math.abs(hoverData.index - extremePoints.min.idx) > 5) && (
+                                            <text x={getX(extremePoints.min.idx)} y={getY(extremePoints.min.val) + 6} fontSize="3" fill="#22c55e" textAnchor="middle" fontWeight="bold">MIN</text>
+                                        )}
+                                    </g>
+                                )}
+
+                                {/* Hover Indicator */}
+                                {hoverData && (
+                                    <g>
+                                        <line 
+                                            x1={hoverData.xPos} y1="0" 
+                                            x2={hoverData.xPos} y2="100" 
+                                            stroke="#9ca3af" strokeWidth="0.5" strokeDasharray="2"
+                                            vectorEffect="non-scaling-stroke"
+                                        />
+                                        <circle 
+                                            cx={hoverData.xPos} 
+                                            cy={getY(hoverData.item.price)} 
+                                            r="2" 
+                                            fill="white" stroke="#3b82f6" strokeWidth="1"
+                                        />
+                                    </g>
+                                )}
+                            </svg>
+
+                            {/* HTML Overlay for Tooltip */}
+                            {hoverData && (
+                                <div 
+                                    style={{ 
+                                        position: 'absolute', 
+                                        left: `${hoverData.xPos}%`, 
+                                        top: 0,
+                                        transform: `translateX(${hoverData.xPos > 50 ? '-105%' : '5%'})`,
+                                        pointerEvents: 'none'
+                                    }}
+                                    className="bg-gray-900/90 text-white p-2 rounded-lg shadow-xl text-xs z-10 backdrop-blur-sm border border-white/20"
+                                >
+                                    <div className="font-bold text-yellow-300 mb-0.5">{formatMoney(hoverData.item.price)}</div>
+                                    <div className="text-gray-300 text-[10px]">{hoverData.item.date} {hoverData.item.label !== hoverData.item.date ? hoverData.item.label : ''}</div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                     
-                    <div className="flex justify-between text-[10px] text-gray-400 mt-2 px-1 border-t border-gray-100 pt-2">
-                        <span>{chartData[0].label}</span>
-                        <span>{chartData[chartData.length - 1].label}</span>
-                    </div>
+                    {/* Footer Labels */}
+                    {chartData && chartData.length > 0 && (
+                        <div className="flex justify-between text-[10px] text-gray-400 mt-2 px-1 border-t border-gray-100 pt-2">
+                            <span>{chartData[0].label}</span>
+                            <span>{chartData[chartData.length - 1].label}</span>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -632,7 +642,7 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-// --- Gold View Component (Updated with new components) ---
+// --- Gold View Component (Updated Order & Layout) ---
 const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
     // UI States for Collapsible Sections
     const [showConverter, setShowConverter] = useState(false);
@@ -687,42 +697,25 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
                 </div>
             </div>
 
-            {/* Current Price Info */}
-            <div className="flex items-center justify-between bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
-                <div>
-                    <div className="text-xs text-gray-400 font-bold flex items-center gap-1 mb-1">
-                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                        台銀賣出金價
-                    </div>
-                    <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
-                        {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
-                    </div>
-                </div>
-                <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
-                    {['1d', '10d', '3m'].map(p => (
-                        <button type="button" key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
-                            {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {/* Collapsible Converter */}
+            {/* Collapsible Converter (Moved to Top as requested) */}
             <GoldConverter 
                 goldPrice={goldPrice} 
                 isVisible={showConverter} 
                 toggleVisibility={() => setShowConverter(!showConverter)} 
             />
 
-            {/* Collapsible Chart */}
+            {/* Collapsible Chart (Merged Price Info & Chart) */}
             <GoldChart 
                 data={history} 
                 intraday={intraday} 
                 period={period} 
+                setPeriod={setPeriod}
+                goldPrice={goldPrice}
                 loading={loading} 
                 isVisible={showChart}
                 toggleVisibility={() => setShowChart(!showChart)}
             />
+            
             {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
 
             {/* Action Button */}
