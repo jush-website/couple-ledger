@@ -426,8 +426,44 @@ const GoldConverter = ({ goldPrice, isVisible, toggleVisibility }) => {
     );
 };
 
-// --- Gold Chart Component ---
-const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVisible, toggleVisibility }) => {
+// --- Gold Chart Component (Smooth & Beautiful) ---
+// Helper functions for Bezier Curve generation
+const svgPath = (points, command) => {
+  const d = points.reduce((acc, point, i, a) => i === 0
+    ? `M ${point[0]},${point[1]}`
+    : `${acc} ${command(point, i, a)}`
+  , '');
+  return d;
+}
+
+const line = (pointA, pointB) => {
+  const lengthX = pointB[0] - pointA[0];
+  const lengthY = pointB[1] - pointA[1];
+  return {
+    length: Math.sqrt(Math.pow(lengthX, 2) + Math.pow(lengthY, 2)),
+    angle: Math.atan2(lengthY, lengthX)
+  };
+}
+
+const controlPoint = (current, previous, next, reverse) => {
+  const p = previous || current;
+  const n = next || current;
+  const smoothing = 0.15; // Smoothness factor (0.15 is good for gentle curves)
+  const o = line(p, n);
+  const angle = o.angle + (reverse ? Math.PI : 0);
+  const length = o.length * smoothing;
+  const x = current[0] + Math.cos(angle) * length;
+  const y = current[1] + Math.sin(angle) * length;
+  return [x, y];
+}
+
+const bezierCommand = (point, i, a) => {
+  const [cpsX, cpsY] = controlPoint(a[i - 1], a[i - 2], point);
+  const [cpeX, cpeY] = controlPoint(point, a[i - 1], a[i + 1], true);
+  return `C ${cpsX.toFixed(2)},${cpsY.toFixed(2)} ${cpeX.toFixed(2)},${cpeY.toFixed(2)} ${point[0]},${point[1]}`;
+}
+
+const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibility, goldPrice, setPeriod }) => {
     const [hoverData, setHoverData] = useState(null);
     const containerRef = useRef(null);
 
@@ -442,44 +478,25 @@ const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVi
         return data.slice(-10);
     }, [data, intraday, period]);
 
-    // Find Min and Max for markers
-    const extremePoints = useMemo(() => {
-        if (!chartData || chartData.length === 0) return { min: null, max: null };
-        let minVal = Infinity, maxVal = -Infinity;
-        let minIdx = -1, maxIdx = -1;
-
-        chartData.forEach((d, i) => {
-            if (d.price < minVal) { minVal = d.price; minIdx = i; }
-            if (d.price > maxVal) { maxVal = d.price; maxIdx = i; }
-        });
-
-        return {
-            min: { val: minVal, idx: minIdx, data: chartData[minIdx] },
-            max: { val: maxVal, idx: maxIdx, data: chartData[maxIdx] }
-        };
-    }, [chartData]);
-
     const handleMouseMove = (e) => {
         if (!containerRef.current || chartData.length === 0) return;
         const rect = containerRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left; // x position within the element.
+        const x = e.clientX - rect.left; 
         const width = rect.width;
-        
-        // Calculate index
-        // x / width = index / (length - 1)
         let index = Math.round((x / width) * (chartData.length - 1));
         index = Math.max(0, Math.min(index, chartData.length - 1));
-        
         setHoverData({
             index,
             item: chartData[index],
-            xPos: (index / (chartData.length - 1)) * 100 // percent
+            xPos: (index / (chartData.length - 1)) * 100 
         });
     };
 
     const handleMouseLeave = () => {
         setHoverData(null);
     };
+
+    if (loading) return null; // Or skeleton
 
     const prices = chartData.map(d => d.price);
     const minPrice = Math.min(...prices) * 0.999;
@@ -489,8 +506,12 @@ const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVi
     const getY = (price) => 100 - ((price - minPrice) / range) * 100;
     const getX = (index) => (index / (chartData.length - 1)) * 100;
 
-    const points = chartData.map((d, i) => `${getX(i)},${getY(d.price)}`).join(' ');
-    const isUp = chartData.length > 1 && chartData[chartData.length - 1].price >= chartData[0].price;
+    // Generate Points for Bezier
+    const points = chartData.map((d, i) => [getX(i), getY(d.price)]);
+    
+    // Create Smooth Path
+    const pathD = points.length > 1 ? svgPath(points, bezierCommand) : '';
+    const fillPathD = points.length > 1 ? `${pathD} L 100,100 L 0,100 Z` : '';
 
     return (
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300 relative group">
@@ -504,10 +525,23 @@ const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVi
                     <div className="text-3xl font-black text-gray-800 tracking-tight">
                         {formatMoney(goldPrice)} <span className="text-sm text-gray-400 font-normal">/克</span>
                     </div>
+                    {/* Multi-unit display */}
+                    <div className="flex flex-wrap gap-2 mt-2">
+                        <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-100 px-2 py-1 rounded-lg">
+                            <Scale size={10} className="text-yellow-600"/>
+                            <span className="text-[10px] font-bold text-yellow-700">
+                                {formatMoney(goldPrice * 3.75)} /台錢
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
+                            <span className="text-[10px] font-bold text-gray-600">
+                                {formatMoney(goldPrice * 1000)} /公斤
+                            </span>
+                        </div>
+                    </div>
                 </div>
                 
                 <div className="flex flex-col items-end gap-3">
-                    {/* Period Selector - Stop propagation so clicking buttons doesn't toggle collapse */}
                     <div className="flex bg-gray-100 rounded-lg p-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         {['1d', '10d', '3m'].map(p => (
                             <button 
@@ -547,49 +581,44 @@ const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVi
                             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
                                 <defs>
                                     <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0.2" />
-                                        <stop offset="100%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0" />
+                                        <stop offset="0%" stopColor="#eab308" stopOpacity="0.3" />
+                                        <stop offset="100%" stopColor="#eab308" stopOpacity="0" />
                                     </linearGradient>
                                 </defs>
-                                <path d={`M0,100 L0,${getY(chartData[0].price)} ${chartData.map((d, i) => `L${getX(i)},${getY(d.price)}`).join(' ')} L100,100 Z`} fill="url(#goldGradient)" />
-                                <polyline points={points} fill="none" stroke={isUp ? "#eab308" : "#22c55e"} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
                                 
-                                {/* Extreme Points Markers */}
-                                {extremePoints.max && (
-                                    <g>
-                                        <circle cx={getX(extremePoints.max.idx)} cy={getY(extremePoints.max.val)} r="1.5" fill="#ef4444" stroke="white" strokeWidth="0.5"/>
-                                        {(!hoverData || Math.abs(hoverData.index - extremePoints.max.idx) > 5) && (
-                                            <text x={getX(extremePoints.max.idx)} y={getY(extremePoints.max.val) - 3} fontSize="3" fill="#ef4444" textAnchor="middle" fontWeight="bold">MAX</text>
-                                        )}
-                                    </g>
-                                )}
-                                {extremePoints.min && (
-                                    <g>
-                                        <circle cx={getX(extremePoints.min.idx)} cy={getY(extremePoints.min.val)} r="1.5" fill="#22c55e" stroke="white" strokeWidth="0.5"/>
-                                        {(!hoverData || Math.abs(hoverData.index - extremePoints.min.idx) > 5) && (
-                                            <text x={getX(extremePoints.min.idx)} y={getY(extremePoints.min.val) + 6} fontSize="3" fill="#22c55e" textAnchor="middle" fontWeight="bold">MIN</text>
-                                        )}
-                                    </g>
-                                )}
+                                {/* Grid Lines (0%, 50%, 100%) */}
+                                <line x1="0" y1="0" x2="100" y2="0" stroke="#f3f4f6" strokeWidth="0.5" strokeDasharray="2" />
+                                <line x1="0" y1="50" x2="100" y2="50" stroke="#f3f4f6" strokeWidth="0.5" strokeDasharray="2" />
+                                <line x1="0" y1="100" x2="100" y2="100" stroke="#f3f4f6" strokeWidth="0.5" strokeDasharray="2" />
 
+                                {/* Area Fill */}
+                                <path d={fillPathD} fill="url(#goldGradient)" />
+                                
+                                {/* Smooth Curve Line */}
+                                <path d={pathD} fill="none" stroke="#eab308" strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                                
                                 {/* Hover Indicator */}
                                 {hoverData && (
                                     <g>
                                         <line 
                                             x1={hoverData.xPos} y1="0" 
                                             x2={hoverData.xPos} y2="100" 
-                                            stroke="#9ca3af" strokeWidth="0.5" strokeDasharray="2"
+                                            stroke="#d1d5db" strokeWidth="0.5" strokeDasharray="2"
                                             vectorEffect="non-scaling-stroke"
                                         />
                                         <circle 
                                             cx={hoverData.xPos} 
                                             cy={getY(hoverData.item.price)} 
-                                            r="2" 
-                                            fill="white" stroke="#3b82f6" strokeWidth="1"
+                                            r="2.5" 
+                                            fill="#eab308" stroke="white" strokeWidth="1.5"
                                         />
                                     </g>
                                 )}
                             </svg>
+
+                            {/* Y-Axis Labels (Right Side) */}
+                            <div className="absolute right-0 top-0 text-[8px] text-gray-300 font-bold -translate-y-1/2 bg-white px-1">{formatMoney(maxPrice)}</div>
+                            <div className="absolute right-0 bottom-0 text-[8px] text-gray-300 font-bold translate-y-1/2 bg-white px-1">{formatMoney(minPrice)}</div>
 
                             {/* HTML Overlay for Tooltip */}
                             {hoverData && (
@@ -601,9 +630,9 @@ const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVi
                                         transform: `translateX(${hoverData.xPos > 50 ? '-105%' : '5%'})`,
                                         pointerEvents: 'none'
                                     }}
-                                    className="bg-gray-900/90 text-white p-2 rounded-lg shadow-xl text-xs z-10 backdrop-blur-sm border border-white/20"
+                                    className="bg-gray-800/90 text-white p-2 rounded-lg shadow-xl text-xs z-10 backdrop-blur-sm border border-white/10"
                                 >
-                                    <div className="font-bold text-yellow-300 mb-0.5">{formatMoney(hoverData.item.price)}</div>
+                                    <div className="font-bold text-yellow-400 mb-0.5">{formatMoney(hoverData.item.price)}</div>
                                     <div className="text-gray-300 text-[10px]">{hoverData.item.date} {hoverData.item.label !== hoverData.item.date ? hoverData.item.label : ''}</div>
                                 </div>
                             )}
@@ -612,8 +641,9 @@ const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVi
                     
                     {/* Footer Labels */}
                     {chartData && chartData.length > 0 && (
-                        <div className="flex justify-between text-[10px] text-gray-400 mt-2 px-1 border-t border-gray-100 pt-2">
+                        <div className="flex justify-between text-[10px] text-gray-400 mt-3 px-1 border-t border-gray-50 pt-2">
                             <span>{chartData[0].label}</span>
+                            {chartData.length > 5 && <span>{chartData[Math.floor(chartData.length/2)].label}</span>}
                             <span>{chartData[chartData.length - 1].label}</span>
                         </div>
                     )}
@@ -642,7 +672,7 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-// --- Gold View Component (Updated Order & Added Features) ---
+// --- Gold View Component (Enhanced) ---
 const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
     // UI States for Collapsible Sections
     const [showConverter, setShowConverter] = useState(false);
@@ -802,7 +832,7 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
     );
 };
 
-// --- Add Gold Modal (New & Fixed) ---
+// ... (Rest of the file remains unchanged: AddGoldModal, Overview, SettingsView, Statistics, Savings, ModalLayout, etc.) ...
 const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
     const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
     const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'tw_liang', 'kg'
@@ -1159,7 +1189,6 @@ const Statistics = ({ transactions }) => {
   );
 };
 
-// --- Savings Component (Updated with Completed State & View) ---
 const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette, onComplete }) => {
   const [viewCompleted, setViewCompleted] = useState(false);
 
