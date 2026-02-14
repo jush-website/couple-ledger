@@ -642,7 +642,7 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-// --- Gold View Component (Updated Order & Layout) ---
+// --- Gold View Component (Updated Order & Added Features) ---
 const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
     // UI States for Collapsible Sections
     const [showConverter, setShowConverter] = useState(false);
@@ -657,6 +657,9 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
     const currentValue = totalWeightGrams * goldPrice;
     const profit = currentValue - totalCost;
     const roi = totalCost > 0 ? (profit / totalCost) * 100 : 0;
+    
+    // NEW: Calculate Average Cost
+    const avgCost = totalWeightGrams > 0 ? totalCost / totalWeightGrams : 0;
 
     return (
         <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
@@ -690,14 +693,30 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
                         </div>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between text-xs font-bold text-white/70">
+                    {/* Enhanced Footer with Avg Cost */}
+                    <div className="mt-4 grid grid-cols-2 gap-y-1 text-xs font-bold text-white/70">
                          <span>購入成本: {formatMoney(totalCost)}</span>
+                         <span>平均成本: {formatMoney(avgCost)}/g</span>
                          <span className={profit >= 0 ? 'text-green-100' : 'text-red-100'}>ROI: {roi.toFixed(2)}%</span>
+                         <span></span>
                     </div>
                 </div>
             </div>
 
-            {/* Collapsible Converter (Moved to Top as requested) */}
+            {/* Action Button - Moved to Top & Styled */}
+            <button 
+                type="button" 
+                onClick={onAdd} 
+                className={`w-full p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform text-white font-bold text-lg
+                    ${role === 'bf' 
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-blue-200' 
+                        : 'bg-gradient-to-r from-pink-500 to-rose-500 shadow-pink-200'}`}
+            >
+                <Plus size={24} />
+                記一筆黃金
+            </button>
+
+            {/* Collapsible Converter */}
             <GoldConverter 
                 goldPrice={goldPrice} 
                 isVisible={showConverter} 
@@ -718,12 +737,6 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
             
             {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
 
-            {/* Action Button */}
-            <button type="button" onClick={onAdd} className="w-full bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                <Plus size={20} />
-                <span className="font-bold">記一筆黃金</span>
-            </button>
-
             {/* Transaction List */}
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
@@ -735,9 +748,12 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
                         <div className="p-8 text-center text-gray-400 text-sm">還沒有黃金紀錄</div>
                     ) : (
                         myTransactions.map(t => {
-                            const itemValue = (Number(t.weight) || 0) * goldPrice;
-                            const itemProfit = itemValue - Number(t.totalCost);
-                            const itemRoi = t.totalCost > 0 ? (itemProfit / t.totalCost) * 100 : 0;
+                            const weightG = Number(t.weight) || 0;
+                            const cost = Number(t.totalCost) || 0;
+                            const itemValue = weightG * goldPrice;
+                            const itemProfit = itemValue - cost;
+                            const itemRoi = cost > 0 ? (itemProfit / cost) * 100 : 0;
+                            const costPerGram = weightG > 0 ? cost / weightG : 0;
 
                             return (
                                 <div key={t.id} onClick={() => onEdit(t)} className="p-4 flex items-start justify-between hover:bg-gray-50 active:bg-gray-100 transition-colors cursor-pointer">
@@ -758,7 +774,11 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
                                                 <span>{t.date}</span>
                                                 {t.channel && <span>• {t.channel}</span>}
                                             </div>
-                                            <div className="text-[10px] text-gray-400 mt-1">成本 {formatMoney(t.totalCost)}</div>
+                                            <div className="text-[10px] text-gray-400 mt-1 flex gap-2">
+                                                <span>總成本 {formatMoney(t.totalCost)}</span>
+                                                <span className="text-gray-300">|</span>
+                                                <span>均價 {formatMoney(costPerGram)}/g</span>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="text-right">
