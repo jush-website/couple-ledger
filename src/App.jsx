@@ -1189,24 +1189,47 @@ const Statistics = ({ transactions }) => {
   );
 };
 
+// --- Savings Component (Updated with Shared/Personal Tabs) ---
 const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette, onComplete }) => {
   const [viewCompleted, setViewCompleted] = useState(false);
+  const [viewType, setViewType] = useState('shared'); // 'shared' or 'personal'
 
-  // Filter jars based on status (undefined is treated as 'active')
-  const activeJars = jars.filter(j => !j.status || j.status === 'active');
-  const completedJars = jars.filter(j => j.status === 'completed');
-  
-  // Sort completed jars by completion date (newest first)
-  completedJars.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
+  // Filter jars based on status and owner
+  const filterJars = (status) => {
+      return jars.filter(j => {
+          // Status check
+          const jStatus = j.status || 'active';
+          const isStatusMatch = status === 'completed' ? jStatus === 'completed' : jStatus !== 'completed';
+          
+          // Owner check
+          const jOwner = j.owner || 'shared';
+          let isOwnerMatch = false;
+          if (viewType === 'shared') {
+              isOwnerMatch = jOwner === 'shared';
+          } else {
+              isOwnerMatch = jOwner !== 'shared'; // Show both BF and GF personal jars in "Personal" tab
+          }
+
+          return isStatusMatch && isOwnerMatch;
+      }).sort((a, b) => {
+          // Sort logic
+          if (status === 'completed') {
+              return (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0);
+          }
+          return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0);
+      });
+  };
+
+  const displayJars = filterJars(viewCompleted ? 'completed' : 'active');
 
   return (
     <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
         <div className="flex justify-between items-center px-2">
             <h2 className="font-bold text-xl text-gray-800">
-                {viewCompleted ? '🏆 榮譽殿堂' : '存錢目標'}
+                {viewCompleted ? '🏆 榮譽殿堂' : '🎯 存錢目標'}
             </h2>
             <div className="flex gap-2">
-                {/* Toggle View Button */}
+                {/* Toggle Completed/Active Button */}
                 <button 
                     onClick={() => setViewCompleted(!viewCompleted)}
                     className={`px-3 py-2 rounded-xl shadow-sm text-xs font-bold flex items-center gap-1.5 transition-all ${viewCompleted ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'}`}
@@ -1214,27 +1237,111 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
                     {viewCompleted ? <Target size={14}/> : <Trophy size={14}/>}
                     {viewCompleted ? '返回目標' : '已完成'}
                 </button>
-                
-                {/* Action buttons only visible in Active view */}
-                {!viewCompleted && (
-                    <>
-                        <button onClick={onOpenRoulette} className="bg-white text-purple-600 p-2 rounded-xl shadow-sm border border-purple-100 active:scale-95 transition-transform flex items-center gap-1 text-xs font-bold"><Dices size={16} /> 命運轉盤</button>
-                        <button onClick={onAdd} className="bg-gray-900 text-white p-2 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-1 text-sm font-bold pr-3"><Plus size={16} /> 新增</button>
-                    </>
-                )}
             </div>
         </div>
 
-        {viewCompleted ? (
-            // Completed Jars View
-            <div className="space-y-4">
-                {completedJars.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
-                        <Trophy size={48} className="opacity-20" />
-                        <span className="text-sm">還沒有完成的目標，加油！</span>
-                    </div>
-                ) : (
-                    completedJars.map(jar => {
+        {/* Sub-Tabs: Shared vs Personal */}
+        <div className="bg-gray-100 p-1 rounded-xl flex">
+            <button 
+                onClick={() => setViewType('shared')}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${viewType === 'shared' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+                <Users size={16}/> 雙人共享
+            </button>
+            <button 
+                onClick={() => setViewType('personal')}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${viewType === 'personal' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+                <User size={16}/> 個人獨享
+            </button>
+        </div>
+
+        {/* Action Buttons (Only for Active View) */}
+        {!viewCompleted && (
+            <div className="flex gap-2">
+                <button onClick={onOpenRoulette} className="flex-1 bg-white text-purple-600 p-3 rounded-xl shadow-sm border border-purple-100 active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm font-bold"><Dices size={18} /> 命運轉盤</button>
+                <button onClick={onAdd} className="flex-1 bg-gray-900 text-white p-3 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2 text-sm font-bold"><Plus size={18} /> 新增目標</button>
+            </div>
+        )}
+
+        {/* Jars Grid */}
+        <div className="space-y-4">
+            {displayJars.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
+                    {viewCompleted ? <Trophy size={48} className="opacity-20" /> : <PiggyBank size={48} className="opacity-20" />}
+                    <span className="text-sm">
+                        {viewCompleted 
+                            ? `還沒有${viewType === 'shared' ? '共同' : '個人'}完成的目標，加油！` 
+                            : `還沒有${viewType === 'shared' ? '共同' : '個人'}存錢計畫，快來建立一個！`}
+                    </span>
+                </div>
+            ) : (
+                displayJars.map(jar => {
+                    const cur = Number(jar.currentAmount) || 0; 
+                    const tgt = Number(jar.targetAmount) || 1; 
+                    const progress = Math.min((cur / tgt) * 100, 100);
+                    const isAchieved = cur >= tgt;
+                    const isPersonal = jar.owner && jar.owner !== 'shared';
+                    
+                    // Render Active Card
+                    if (!viewCompleted) {
+                        return (
+                            <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative overflow-hidden group flex flex-col">
+                                <div className="flex justify-between items-start mb-4 relative z-10">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                                {jar.name}
+                                                <button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500"><Pencil size={14}/></button>
+                                            </h3>
+                                            {isPersonal && (
+                                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${jar.owner === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>
+                                                    {jar.owner === 'bf' ? '👦 男友' : '👧 女友'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-gray-400 mt-1">目標 {formatMoney(tgt)}</div>
+                                    </div>
+                                    <div className={`font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1 ${isAchieved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                        {isAchieved ? <CheckCircle size={12}/> : <Target size={12}/>} {Math.round(progress)}%
+                                    </div>
+                                </div>
+                                
+                                <div className="mb-4 relative z-10">
+                                    <div className="text-3xl font-black text-gray-800 mb-1">{formatMoney(cur)}</div>
+                                    <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
+                                        <div className={`h-full transition-all duration-1000 ${isAchieved ? 'bg-green-500' : 'bg-gradient-to-r from-yellow-300 to-orange-400'}`} style={{ width: `${progress}%` }}></div>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex justify-between items-center relative z-10 mb-4">
+                                    <div className="flex gap-2">
+                                        <div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
+                                        <div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button>
+                                        <button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>
+                                        <button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button>
+                                    </div>
+                                </div>
+
+                                <button 
+                                    disabled={!isAchieved}
+                                    onClick={() => onComplete(jar)}
+                                    className={`w-full mt-auto py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all 
+                                        ${isAchieved 
+                                            ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-white shadow-lg shadow-orange-200 active:scale-95 animate-pulse' 
+                                            : 'bg-gray-100 text-gray-300 cursor-not-allowed border border-gray-200'}`}
+                                >
+                                    {isAchieved ? <><Trophy size={16}/> 達成目標！點擊完成</> : '尚未達成目標'}
+                                </button>
+
+                                <PiggyBank className="absolute -bottom-4 -right-4 text-gray-50 opacity-50 z-0 transform -rotate-12" size={120} />
+                            </div>
+                        );
+                    } else {
+                        // Render Completed Card
                         const date = jar.completedAt ? new Date(jar.completedAt.seconds * 1000).toLocaleDateString() : '未知日期';
                         return (
                             <div key={jar.id} className="bg-yellow-50/50 border border-yellow-100 p-5 rounded-3xl relative overflow-hidden group">
@@ -1242,9 +1349,16 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
                                     <div>
                                         <div className="flex items-center gap-2 mb-1">
                                             <h3 className="font-bold text-lg text-gray-800">{jar.name}</h3>
-                                            <span className="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-0.5 rounded-full">已完成</span>
+                                            {isPersonal && (
+                                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${jar.owner === 'bf' ? 'bg-blue-100 text-blue-600' : 'bg-pink-100 text-pink-600'}`}>
+                                                    {jar.owner === 'bf' ? '👦 男友' : '👧 女友'}
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="text-xs text-gray-400">達成日期: {date}</div>
+                                        <div className="flex gap-2">
+                                            <span className="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-0.5 rounded-full">已完成</span>
+                                            <span className="text-xs text-gray-400 flex items-center">達成日期: {date}</span>
+                                        </div>
                                     </div>
                                     <Trophy className="text-yellow-400" size={24} />
                                 </div>
@@ -1266,71 +1380,10 @@ const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, on
                                 </div>
                             </div>
                         );
-                    })
-                )}
-            </div>
-        ) : (
-            // Active Jars View (Existing Grid)
-            <div className="grid gap-4">
-                {activeJars.map(jar => {
-                    const cur = Number(jar.currentAmount) || 0; 
-                    const tgt = Number(jar.targetAmount) || 1; 
-                    const progress = Math.min((cur / tgt) * 100, 100);
-                    const isAchieved = cur >= tgt;
-
-                    return (
-                    <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative overflow-hidden group flex flex-col">
-                        <div className="flex justify-between items-start mb-4 relative z-10">
-                            <div>
-                                <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
-                                    {jar.name}
-                                    <button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500"><Pencil size={14}/></button>
-                                </h3>
-                                <div className="text-xs text-gray-400 mt-1">目標 {formatMoney(tgt)}</div>
-                            </div>
-                            <div className={`font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1 ${isAchieved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                {isAchieved ? <CheckCircle size={12}/> : <Target size={12}/>} {Math.round(progress)}%
-                            </div>
-                        </div>
-                        
-                        <div className="mb-4 relative z-10">
-                            <div className="text-3xl font-black text-gray-800 mb-1">{formatMoney(cur)}</div>
-                            <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
-                                <div className={`h-full transition-all duration-1000 ${isAchieved ? 'bg-green-500' : 'bg-gradient-to-r from-yellow-300 to-orange-400'}`} style={{ width: `${progress}%` }}></div>
-                            </div>
-                        </div>
-                        
-                        <div className="flex justify-between items-center relative z-10 mb-4">
-                            <div className="flex gap-2">
-                                <div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
-                                <div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button>
-                                <button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>
-                                <button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button>
-                            </div>
-                        </div>
-
-                        {/* Complete Button */}
-                        <button 
-                            disabled={!isAchieved}
-                            onClick={() => onComplete(jar)}
-                            className={`w-full mt-auto py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all 
-                                ${isAchieved 
-                                    ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-white shadow-lg shadow-orange-200 active:scale-95 animate-pulse' 
-                                    : 'bg-gray-100 text-gray-300 cursor-not-allowed border border-gray-200'}`}
-                        >
-                            {isAchieved ? <><Trophy size={16}/> 達成目標！點擊完成</> : '尚未達成目標'}
-                        </button>
-
-                        <PiggyBank className="absolute -bottom-4 -right-4 text-gray-50 opacity-50 z-0 transform -rotate-12" size={120} />
-                    </div>
-                    );
-                })}
-                {activeJars.length === 0 && <div className="text-center py-10 text-gray-400">還沒有存錢計畫，快來建立一個！</div>}
-            </div>
-        )}
+                    }
+                })
+            )}
+        </div>
     </div>
   );
 };
@@ -1412,15 +1465,40 @@ const AddTransactionModal = ({ onClose, onSave, currentUserRole, initialData }) 
   );
 };
 
-const AddJarModal = ({ onClose, onSave, initialData }) => {
+const AddJarModal = ({ onClose, onSave, initialData, role }) => {
   const [name, setName] = useState(initialData?.name || '');
   const [target, setTarget] = useState(initialData?.targetAmount?.toString() || '');
+  const [type, setType] = useState(initialData?.owner && initialData.owner !== 'shared' ? 'personal' : 'shared');
+
   return (
     <ModalLayout title={initialData ? "編輯存錢罐" : "新存錢罐"} onClose={onClose}>
       <div className="space-y-4">
+        {/* Type Selector */}
+        <div className="bg-gray-100 p-1 rounded-xl flex mb-2">
+            <button 
+                type="button"
+                onClick={() => setType('shared')}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${type === 'shared' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+                <Users size={16}/> 🤝 一起存
+            </button>
+            <button 
+                type="button"
+                onClick={() => setType('personal')}
+                className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${type === 'personal' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+                <User size={16}/> 👤 個人存
+            </button>
+        </div>
+
         <div className="bg-gray-50 p-3 rounded-2xl"><label className="block mb-1 text-xs font-bold text-gray-400">目標金額</label><div className="text-2xl font-black text-gray-800 tracking-wider h-8 flex items-center overflow-hidden">{target ? target : <span className="text-gray-300">0</span>}</div></div>
         <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="名稱 (例如: 旅遊基金)" className="w-full bg-gray-50 border-none rounded-xl p-3 text-sm font-bold focus:ring-2 focus:ring-blue-100 outline-none" />
-        <CalculatorKeypad value={target} onChange={setTarget} onConfirm={(val) => { if (name && val) onSave(name, val); }} compact={true} />
+        <CalculatorKeypad value={target} onChange={setTarget} onConfirm={(val) => { 
+            if (name && val) {
+                const owner = type === 'shared' ? 'shared' : role;
+                onSave(name, val, owner); 
+            }
+        }} compact={true} />
       </div>
     </ModalLayout>
   );
@@ -1720,12 +1798,16 @@ export default function App() {
       });
   };
 
-  const handleSaveJar = async (name, target) => {
+  const handleSaveJar = async (name, target, owner) => {
     if (!user) return;
     try {
       const finalTarget = Number(safeCalculate(target));
       if (editingJar) {
-         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), { name, targetAmount: finalTarget, updatedAt: serverTimestamp() });
+         // Update existing jar (owner is usually not changed on edit to avoid confusion, but if new owner passed we use it)
+         const updateData = { name, targetAmount: finalTarget, updatedAt: serverTimestamp() };
+         if (owner) updateData.owner = owner; // Only update owner if provided (e.g. creating new)
+         
+         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', editingJar.id), updateData);
          showToast('存錢罐已更新 ✨');
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'savings_jars'), { 
@@ -1734,6 +1816,7 @@ export default function App() {
             currentAmount: 0, 
             contributions: { bf: 0, gf: 0 }, 
             history: [], 
+            owner: owner || 'shared', // Default to shared if undefined
             createdAt: serverTimestamp() 
         });
         showToast('存錢罐已建立 🎯');
@@ -2049,7 +2132,7 @@ export default function App() {
       )}
 
       {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
-      {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} />}
+      {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} role={role} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
       {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
