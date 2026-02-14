@@ -14,7 +14,8 @@ import {
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
   Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users,
-  Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle
+  Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle,
+  Calculator, ChevronDown, ChevronUp, MousePointerClick, ArrowUpCircle, ArrowDownCircle
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -30,7 +31,7 @@ const firebaseConfig = {
 
 // --- Helper Functions ---
 const analyzeReceiptImage = async (base64Image, mimeType = "image/jpeg") => {
-    const apiKey = "AIzaSyAVr-jNp2WiiAauPoscBNuDkF-wlg2QofA"; 
+    const apiKey = ""; // Keep empty as per instructions, injected at runtime usually
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
     
     const prompt = `
@@ -99,6 +100,13 @@ const formatWeight = (grams, unit = 'g') => {
     if (unit === 'tw_qian') {
         // 1 台錢 = 3.75 克
         return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num / 3.75) + '錢';
+    }
+    if (unit === 'tw_liang') {
+        // 1 台兩 = 10 台錢 = 37.5 克
+        return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(num / 37.5) + '兩';
+    }
+    if (unit === 'kg') {
+        return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(num / 1000) + '公斤';
     }
     return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num) + '克';
 };
@@ -325,30 +333,171 @@ const SimpleDonutChart = ({ data, total }) => {
   );
 };
 
-// --- Gold Chart Component ---
-const GoldChart = ({ data, intraday, period, loading }) => {
-    if (loading) {
-        return <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs"><Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...</div>;
-    }
+// --- Gold Converter Component (New) ---
+const GoldConverter = ({ goldPrice, isVisible, toggleVisibility }) => {
+    const [amount, setAmount] = useState('');
+    const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'tw_liang', 'kg', 'twd'
+
+    // 基礎單位是公克 (grams)
+    const getGrams = () => {
+        const val = parseFloat(amount);
+        if (isNaN(val)) return 0;
+        
+        switch(unit) {
+            case 'g': return val;
+            case 'tw_qian': return val * 3.75;
+            case 'tw_liang': return val * 37.5;
+            case 'kg': return val * 1000;
+            case 'twd': return val / (goldPrice || 1); // 如果輸入金額，除以金價得到克數
+            default: return 0;
+        }
+    };
+
+    const grams = getGrams();
     
+    // 計算顯示數值
+    const displayValues = {
+        twd: grams * goldPrice,
+        g: grams,
+        tw_qian: grams / 3.75,
+        tw_liang: grams / 37.5,
+        kg: grams / 1000
+    };
+
+    return (
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300">
+            <button 
+                onClick={toggleVisibility}
+                className="w-full p-4 flex items-center justify-between bg-gray-50/50 hover:bg-gray-100 transition-colors"
+            >
+                <div className="flex items-center gap-2 font-bold text-gray-700">
+                    <Calculator size={18} className="text-orange-500"/>
+                    黃金計算機
+                </div>
+                {isVisible ? <ChevronUp size={18} className="text-gray-400"/> : <ChevronDown size={18} className="text-gray-400"/>}
+            </button>
+
+            {isVisible && (
+                <div className="p-5 animate-[fadeIn_0.3s]">
+                    <div className="flex gap-2 mb-4">
+                        <div className="relative flex-1">
+                            <input 
+                                type="number" 
+                                value={amount} 
+                                onChange={(e) => setAmount(e.target.value)} 
+                                placeholder="0" 
+                                className="w-full bg-gray-50 text-2xl font-black text-gray-800 p-3 rounded-xl border-2 border-transparent focus:border-orange-200 outline-none transition-colors"
+                            />
+                        </div>
+                        <select 
+                            value={unit} 
+                            onChange={(e) => setUnit(e.target.value)}
+                            className="bg-gray-100 font-bold text-gray-600 rounded-xl px-2 outline-none border-r-[10px] border-transparent"
+                        >
+                            <option value="g">公克 (g)</option>
+                            <option value="tw_qian">台錢</option>
+                            <option value="tw_liang">台兩</option>
+                            <option value="kg">公斤</option>
+                            <option value="twd">金額 (NTD)</option>
+                        </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className={`p-3 rounded-xl border ${unit === 'twd' ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-100'}`}>
+                            <div className="text-[10px] text-gray-400 mb-1">金額 (TWD)</div>
+                            <div className="font-black text-gray-800 text-lg">{formatMoney(displayValues.twd)}</div>
+                        </div>
+                        <div className={`p-3 rounded-xl border ${unit === 'tw_liang' ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-100'}`}>
+                            <div className="text-[10px] text-gray-400 mb-1">台兩</div>
+                            <div className="font-bold text-gray-800 text-lg">{new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 4 }).format(displayValues.tw_liang)} <span className="text-xs font-normal text-gray-400">兩</span></div>
+                        </div>
+                        <div className={`p-3 rounded-xl border ${unit === 'tw_qian' ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-100'}`}>
+                            <div className="text-[10px] text-gray-400 mb-1">台錢</div>
+                            <div className="font-bold text-gray-800 text-lg">{new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 3 }).format(displayValues.tw_qian)} <span className="text-xs font-normal text-gray-400">錢</span></div>
+                        </div>
+                        <div className={`p-3 rounded-xl border ${unit === 'g' ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-100'}`}>
+                            <div className="text-[10px] text-gray-400 mb-1">公克 (g)</div>
+                            <div className="font-bold text-gray-800 text-lg">{new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(displayValues.g)} <span className="text-xs font-normal text-gray-400">克</span></div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- Gold Chart Component (Enhanced with Interactive Tooltip & Min/Max) ---
+const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibility }) => {
+    const [hoverData, setHoverData] = useState(null);
+    const containerRef = useRef(null);
+
     // 決定要使用的數據源
     const chartData = useMemo(() => {
-        // 如果選的是即時 (1d)，且有 intraday 資料，就用 intraday
         if (period === '1d') {
             return intraday && intraday.length > 0 ? intraday : []; 
         }
-        // 否則使用歷史日線資料
         if (!data || data.length === 0) return [];
-        if (period === '10d') return data.slice(-10); // 取最後 10 筆
+        if (period === '10d') return data.slice(-10);
         if (period === '3m') return data.slice(-90); 
         return data.slice(-10);
     }, [data, intraday, period]);
 
+    // Find Min and Max for markers
+    const extremePoints = useMemo(() => {
+        if (!chartData || chartData.length === 0) return { min: null, max: null };
+        let minVal = Infinity, maxVal = -Infinity;
+        let minIdx = -1, maxIdx = -1;
+
+        chartData.forEach((d, i) => {
+            if (d.price < minVal) { minVal = d.price; minIdx = i; }
+            if (d.price > maxVal) { maxVal = d.price; maxIdx = i; }
+        });
+
+        return {
+            min: { val: minVal, idx: minIdx, data: chartData[minIdx] },
+            max: { val: maxVal, idx: maxIdx, data: chartData[maxIdx] }
+        };
+    }, [chartData]);
+
+    const handleMouseMove = (e) => {
+        if (!containerRef.current || chartData.length === 0) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left; // x position within the element.
+        const width = rect.width;
+        
+        // Calculate index
+        // x / width = index / (length - 1)
+        let index = Math.round((x / width) * (chartData.length - 1));
+        index = Math.max(0, Math.min(index, chartData.length - 1));
+        
+        setHoverData({
+            index,
+            item: chartData[index],
+            xPos: (index / (chartData.length - 1)) * 100 // percent
+        });
+    };
+
+    const handleMouseLeave = () => {
+        setHoverData(null);
+    };
+
+    if (loading) {
+        return <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs"><Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...</div>;
+    }
+
     if (!chartData || chartData.length === 0) {
         return (
-            <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 text-xs gap-2">
-                <BarChart3 size={24} className="opacity-50"/>
-                <span>{period === '1d' ? '今日尚無即時交易數據' : '尚無足夠的歷史數據'}</span>
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 mb-4">
+                 <button onClick={toggleVisibility} className="w-full flex items-center justify-between">
+                     <div className="text-gray-700 font-bold flex items-center gap-2"><BarChart3 size={18}/> 價格走勢</div>
+                     {isVisible ? <ChevronUp size={18} className="text-gray-400"/> : <ChevronDown size={18} className="text-gray-400"/>}
+                 </button>
+                 {isVisible && (
+                    <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 text-xs gap-2 mt-4">
+                        <BarChart3 size={24} className="opacity-50"/>
+                        <span>{period === '1d' ? '今日尚無即時交易數據' : '尚無足夠的歷史數據'}</span>
+                    </div>
+                 )}
             </div>
         );
     }
@@ -365,22 +514,101 @@ const GoldChart = ({ data, intraday, period, loading }) => {
     const isUp = chartData[chartData.length - 1].price >= chartData[0].price;
 
     return (
-        <div className="w-full h-48 relative mt-4">
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
-                <defs>
-                    <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0.2" />
-                        <stop offset="100%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0" />
-                    </linearGradient>
-                </defs>
-                <path d={`M0,100 L0,${getY(chartData[0].price)} ${chartData.map((d, i) => `L${getX(i)},${getY(d.price)}`).join(' ')} L100,100 Z`} fill="url(#goldGradient)" />
-                <polyline points={points} fill="none" stroke={isUp ? "#eab308" : "#22c55e"} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-            </svg>
-            <div className="flex justify-between text-[10px] text-gray-400 mt-2 px-1">
-                <span>{chartData[0].label}</span>
-                {chartData.length > 5 && <span>{chartData[Math.floor(chartData.length / 2)].label}</span>}
-                <span>{chartData[chartData.length - 1].label}</span>
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300">
+            <div className="p-4 flex items-center justify-between bg-gray-50/50">
+                 <button onClick={toggleVisibility} className="flex-1 flex items-center justify-between">
+                     <div className="text-gray-700 font-bold flex items-center gap-2">
+                         <BarChart3 size={18} className="text-blue-500"/> 
+                         價格走勢 
+                         <span className="text-xs font-normal text-gray-400 ml-2">
+                             (最高: {extremePoints.max ? formatMoney(extremePoints.max.val) : '-'})
+                         </span>
+                     </div>
+                     {isVisible ? <ChevronUp size={18} className="text-gray-400"/> : <ChevronDown size={18} className="text-gray-400"/>}
+                 </button>
             </div>
+            
+            {isVisible && (
+                <div className="p-5 animate-[fadeIn_0.3s]">
+                    <div className="w-full h-48 relative select-none" 
+                         ref={containerRef}
+                         onMouseMove={handleMouseMove}
+                         onTouchMove={(e) => handleMouseMove(e.touches[0])}
+                         onMouseLeave={handleMouseLeave}
+                         onTouchEnd={handleMouseLeave}
+                    >
+                        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full overflow-visible">
+                            <defs>
+                                <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0.2" />
+                                    <stop offset="100%" stopColor={isUp ? "#eab308" : "#22c55e"} stopOpacity="0" />
+                                </linearGradient>
+                            </defs>
+                            <path d={`M0,100 L0,${getY(chartData[0].price)} ${chartData.map((d, i) => `L${getX(i)},${getY(d.price)}`).join(' ')} L100,100 Z`} fill="url(#goldGradient)" />
+                            <polyline points={points} fill="none" stroke={isUp ? "#eab308" : "#22c55e"} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                            
+                            {/* Extreme Points Markers */}
+                            {extremePoints.max && (
+                                <g>
+                                    <circle cx={getX(extremePoints.max.idx)} cy={getY(extremePoints.max.val)} r="1.5" fill="#ef4444" stroke="white" strokeWidth="0.5"/>
+                                    {/* Only show label if not hovering close to it to avoid clutter */}
+                                    {(!hoverData || Math.abs(hoverData.index - extremePoints.max.idx) > 5) && (
+                                        <text x={getX(extremePoints.max.idx)} y={getY(extremePoints.max.val) - 3} fontSize="3" fill="#ef4444" textAnchor="middle" fontWeight="bold">MAX</text>
+                                    )}
+                                </g>
+                            )}
+                            {extremePoints.min && (
+                                <g>
+                                    <circle cx={getX(extremePoints.min.idx)} cy={getY(extremePoints.min.val)} r="1.5" fill="#22c55e" stroke="white" strokeWidth="0.5"/>
+                                    {(!hoverData || Math.abs(hoverData.index - extremePoints.min.idx) > 5) && (
+                                        <text x={getX(extremePoints.min.idx)} y={getY(extremePoints.min.val) + 6} fontSize="3" fill="#22c55e" textAnchor="middle" fontWeight="bold">MIN</text>
+                                    )}
+                                </g>
+                            )}
+
+                            {/* Hover Indicator */}
+                            {hoverData && (
+                                <g>
+                                    <line 
+                                        x1={hoverData.xPos} y1="0" 
+                                        x2={hoverData.xPos} y2="100" 
+                                        stroke="#9ca3af" strokeWidth="0.5" strokeDasharray="2"
+                                        vectorEffect="non-scaling-stroke"
+                                    />
+                                    <circle 
+                                        cx={hoverData.xPos} 
+                                        cy={getY(hoverData.item.price)} 
+                                        r="2" 
+                                        fill="white" stroke="#3b82f6" strokeWidth="1"
+                                    />
+                                </g>
+                            )}
+                        </svg>
+
+                        {/* HTML Overlay for Tooltip */}
+                        {hoverData && (
+                            <div 
+                                style={{ 
+                                    position: 'absolute', 
+                                    left: `${hoverData.xPos}%`, 
+                                    top: 0,
+                                    transform: `translateX(${hoverData.xPos > 50 ? '-105%' : '5%'})`, // Flip side based on position
+                                    pointerEvents: 'none'
+                                }}
+                                className="bg-gray-900/90 text-white p-2 rounded-lg shadow-xl text-xs z-10 backdrop-blur-sm border border-white/20"
+                            >
+                                <div className="font-bold text-yellow-300 mb-0.5">{formatMoney(hoverData.item.price)}</div>
+                                <div className="text-gray-300 text-[10px]">{hoverData.item.date} {hoverData.item.label !== hoverData.item.date ? hoverData.item.label : ''}</div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div className="flex justify-between text-[10px] text-gray-400 mt-2 px-1 border-t border-gray-100 pt-2">
+                        <span>{chartData[0].label}</span>
+                        <span>{chartData[chartData.length - 1].label}</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -404,8 +632,12 @@ const RoleSelection = ({ onSelect }) => (
   </div>
 );
 
-// --- Gold View Component (Enhanced) ---
+// --- Gold View Component (Updated with new components) ---
 const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
+    // UI States for Collapsible Sections
+    const [showConverter, setShowConverter] = useState(false);
+    const [showChart, setShowChart] = useState(true);
+
     // Filter transactions by current user
     const myTransactions = transactions.filter(t => t.owner === role);
     
@@ -455,46 +687,43 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
                 </div>
             </div>
 
-            {/* Chart Section - UPDATED with multiple units */}
-            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-                <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <div className="text-xs text-gray-400 font-bold flex items-center gap-1 mb-1">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                            台銀賣出金價
-                        </div>
-                        <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
-                            {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
-                        </div>
-                        
-                        {/* 新增：多單位價格顯示 */}
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            <div className="flex items-center gap-1 bg-yellow-50 border border-yellow-100 px-2 py-1 rounded-lg">
-                                <Scale size={10} className="text-yellow-600"/>
-                                <span className="text-[10px] font-bold text-yellow-700">
-                                    {formatMoney(goldPrice * 3.75)} /台錢
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-1 bg-gray-50 border border-gray-100 px-2 py-1 rounded-lg">
-                                <span className="text-[10px] font-bold text-gray-600">
-                                    {formatMoney(goldPrice * 1000)} /公斤
-                                </span>
-                            </div>
-                        </div>
+            {/* Current Price Info */}
+            <div className="flex items-center justify-between bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+                <div>
+                    <div className="text-xs text-gray-400 font-bold flex items-center gap-1 mb-1">
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        台銀賣出金價
                     </div>
-                    
-                    <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
-                        {['1d', '10d', '3m'].map(p => (
-                            <button type="button" key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
-                                {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
-                            </button>
-                        ))}
+                    <div className="text-2xl font-black text-gray-800 flex items-center gap-2">
+                        {formatMoney(goldPrice)} <span className="text-xs text-gray-400 font-normal">/克</span>
                     </div>
                 </div>
-                
-                <GoldChart data={history} intraday={intraday} period={period} loading={loading} />
-                {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
+                <div className="flex bg-gray-100 rounded-lg p-1 shrink-0">
+                    {['1d', '10d', '3m'].map(p => (
+                        <button type="button" key={p} onClick={() => setPeriod(p)} className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${period === p ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400'}`}>
+                            {p === '1d' ? '即時' : (p === '10d' ? '近十日' : '近三月')}
+                        </button>
+                    ))}
+                </div>
             </div>
+
+            {/* Collapsible Converter */}
+            <GoldConverter 
+                goldPrice={goldPrice} 
+                isVisible={showConverter} 
+                toggleVisibility={() => setShowConverter(!showConverter)} 
+            />
+
+            {/* Collapsible Chart */}
+            <GoldChart 
+                data={history} 
+                intraday={intraday} 
+                period={period} 
+                loading={loading} 
+                isVisible={showChart}
+                toggleVisibility={() => setShowChart(!showChart)}
+            />
+            {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 p-2 rounded-lg">{error}</div>}
 
             {/* Action Button */}
             <button type="button" onClick={onAdd} className="w-full bg-gray-900 text-white p-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
@@ -563,9 +792,11 @@ const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, 
 // --- Add Gold Modal (New & Fixed) ---
 const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
     const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
-    const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'kg'
+    const [unit, setUnit] = useState('g'); // 'g', 'tw_qian', 'tw_liang', 'kg'
     // 確保初始值是字串，避免 undefined
-    const [weightInput, setWeightInput] = useState(initialData?.weight ? (initialData.weight / (unit==='tw_qian'?3.75:1)).toString() : '');
+    const [weightInput, setWeightInput] = useState(initialData?.weight ? (initialData.weight / (
+        unit==='tw_qian'?3.75 : (unit==='tw_liang'?37.5 : (unit==='kg'?1000:1))
+    )).toString() : '');
     const [totalCost, setTotalCost] = useState(initialData?.totalCost?.toString() ?? '');
     const [channel, setChannel] = useState(initialData?.channel || '');
     const [note, setNote] = useState(initialData?.note || '');
@@ -609,6 +840,7 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
 
         let weightInGrams = weightNum;
         if (unit === 'tw_qian') weightInGrams = weightInGrams * 3.75;
+        if (unit === 'tw_liang') weightInGrams = weightInGrams * 37.5;
         if (unit === 'kg') weightInGrams = weightInGrams * 1000;
 
         onSave({
@@ -644,13 +876,13 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
                 <div className="bg-gray-50 p-4 rounded-2xl border-2 border-transparent focus-within:border-yellow-200 transition-colors">
                     <div className="flex justify-between mb-2">
                         <label className="text-xs font-bold text-gray-400">重量</label>
-                        <div className="flex bg-white rounded-lg p-0.5 shadow-sm">
-                            {[{id:'tw_qian', label:'台錢'}, {id:'g', label:'公克'}, {id:'kg', label:'公斤'}].map(u => (
+                        <div className="flex bg-white rounded-lg p-0.5 shadow-sm overflow-auto hide-scrollbar">
+                            {[{id:'tw_qian', label:'台錢'}, {id:'tw_liang', label:'台兩'}, {id:'g', label:'公克'}, {id:'kg', label:'公斤'}].map(u => (
                                 <button 
                                     type="button"
                                     key={u.id} 
                                     onClick={()=>setUnit(u.id)} 
-                                    className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${unit===u.id ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:bg-gray-50'}`}
+                                    className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all whitespace-nowrap ${unit===u.id ? 'bg-yellow-500 text-white' : 'text-gray-400 hover:bg-gray-50'}`}
                                 >
                                     {u.label}
                                 </button>
@@ -667,7 +899,7 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
                             className="bg-transparent text-4xl font-black text-gray-800 w-full outline-none" 
                         />
                         <span className="text-sm font-bold text-gray-400 mb-1">
-                            {unit === 'tw_qian' ? '錢' : (unit === 'g' ? '克' : '公斤')}
+                            {unit === 'tw_qian' ? '錢' : (unit === 'tw_liang' ? '兩' : (unit === 'g' ? '克' : '公斤'))}
                         </span>
                     </div>
                 </div>
