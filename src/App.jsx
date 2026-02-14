@@ -15,7 +15,7 @@ import {
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
   Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users,
   Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle,
-  Calculator, ChevronDown, ChevronUp, MousePointerClick, ArrowUpCircle, ArrowDownCircle
+  Calculator, ChevronDown, ChevronUp, MousePointerClick, ArrowUpCircle, ArrowDownCircle, Trophy
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -426,7 +426,7 @@ const GoldConverter = ({ goldPrice, isVisible, toggleVisibility }) => {
     );
 };
 
-// --- Gold Chart Component (Redesigned Header + Merged) ---
+// --- Gold Chart Component ---
 const GoldChart = ({ data, intraday, period, setPeriod, goldPrice, loading, isVisible, toggleVisibility }) => {
     const [hoverData, setHoverData] = useState(null);
     const containerRef = useRef(null);
@@ -1159,34 +1159,152 @@ const Statistics = ({ transactions }) => {
   );
 };
 
-const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette }) => (
-  <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
-    <div className="flex justify-between items-center px-2">
-      <h2 className="font-bold text-xl text-gray-800">存錢目標</h2>
-      <div className="flex gap-2">
-          <button onClick={onOpenRoulette} className="bg-white text-purple-600 p-2 rounded-xl shadow-sm border border-purple-100 active:scale-95 transition-transform flex items-center gap-1 text-xs font-bold"><Dices size={16} /> 命運轉盤</button>
-          <button onClick={onAdd} className="bg-gray-900 text-white p-2 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-1 text-sm font-bold pr-3"><Plus size={16} /> 新增</button>
-      </div>
-    </div>
-    <div className="grid gap-4">
-      {jars.map(jar => {
-        const cur = Number(jar.currentAmount) || 0; const tgt = Number(jar.targetAmount) || 1; const progress = Math.min((cur / tgt) * 100, 100);
-        return (
-          <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative overflow-hidden group">
-            <div className="flex justify-between items-start mb-4 relative z-10"><div><h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">{jar.name}<button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500"><Pencil size={14}/></button></h3><div className="text-xs text-gray-400 mt-1">目標 {formatMoney(tgt)}</div></div><div className="bg-yellow-100 text-yellow-700 font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1"><Target size={12} /> {Math.round(progress)}%</div></div>
-            <div className="mb-4 relative z-10"><div className="text-3xl font-black text-gray-800 mb-1">{formatMoney(cur)}</div><div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-yellow-300 to-orange-400 transition-all duration-1000" style={{ width: `${progress}%` }}></div></div></div>
-            <div className="flex justify-between items-center relative z-10">
-                <div className="flex gap-2"><div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div><div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div></div>
-                <div className="flex gap-2"><button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button><button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button><button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button></div>
+// --- Savings Component (Updated with Completed State & View) ---
+const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette, onComplete }) => {
+  const [viewCompleted, setViewCompleted] = useState(false);
+
+  // Filter jars based on status (undefined is treated as 'active')
+  const activeJars = jars.filter(j => !j.status || j.status === 'active');
+  const completedJars = jars.filter(j => j.status === 'completed');
+  
+  // Sort completed jars by completion date (newest first)
+  completedJars.sort((a, b) => (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0));
+
+  return (
+    <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
+        <div className="flex justify-between items-center px-2">
+            <h2 className="font-bold text-xl text-gray-800">
+                {viewCompleted ? '🏆 榮譽殿堂' : '存錢目標'}
+            </h2>
+            <div className="flex gap-2">
+                {/* Toggle View Button */}
+                <button 
+                    onClick={() => setViewCompleted(!viewCompleted)}
+                    className={`px-3 py-2 rounded-xl shadow-sm text-xs font-bold flex items-center gap-1.5 transition-all ${viewCompleted ? 'bg-gray-800 text-white' : 'bg-white text-gray-500 border border-gray-100 hover:bg-gray-50'}`}
+                >
+                    {viewCompleted ? <Target size={14}/> : <Trophy size={14}/>}
+                    {viewCompleted ? '返回目標' : '已完成'}
+                </button>
+                
+                {/* Action buttons only visible in Active view */}
+                {!viewCompleted && (
+                    <>
+                        <button onClick={onOpenRoulette} className="bg-white text-purple-600 p-2 rounded-xl shadow-sm border border-purple-100 active:scale-95 transition-transform flex items-center gap-1 text-xs font-bold"><Dices size={16} /> 命運轉盤</button>
+                        <button onClick={onAdd} className="bg-gray-900 text-white p-2 rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-1 text-sm font-bold pr-3"><Plus size={16} /> 新增</button>
+                    </>
+                )}
             </div>
-            <PiggyBank className="absolute -bottom-4 -right-4 text-gray-50 opacity-50 z-0 transform -rotate-12" size={120} />
-          </div>
-        );
-      })}
-      {jars.length === 0 && <div className="text-center py-10 text-gray-400">還沒有存錢計畫，快來建立一個！</div>}
+        </div>
+
+        {viewCompleted ? (
+            // Completed Jars View
+            <div className="space-y-4">
+                {completedJars.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
+                        <Trophy size={48} className="opacity-20" />
+                        <span className="text-sm">還沒有完成的目標，加油！</span>
+                    </div>
+                ) : (
+                    completedJars.map(jar => {
+                        const date = jar.completedAt ? new Date(jar.completedAt.seconds * 1000).toLocaleDateString() : '未知日期';
+                        return (
+                            <div key={jar.id} className="bg-yellow-50/50 border border-yellow-100 p-5 rounded-3xl relative overflow-hidden group">
+                                <div className="flex justify-between items-start relative z-10">
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <h3 className="font-bold text-lg text-gray-800">{jar.name}</h3>
+                                            <span className="bg-yellow-100 text-yellow-700 text-[10px] font-bold px-2 py-0.5 rounded-full">已完成</span>
+                                        </div>
+                                        <div className="text-xs text-gray-400">達成日期: {date}</div>
+                                    </div>
+                                    <Trophy className="text-yellow-400" size={24} />
+                                </div>
+                                
+                                <div className="mt-4 flex items-end gap-2">
+                                    <div className="text-3xl font-black text-gray-800">{formatMoney(jar.currentAmount)}</div>
+                                    <div className="text-xs text-gray-400 mb-1.5 font-bold">/ 目標 {formatMoney(jar.targetAmount)}</div>
+                                </div>
+
+                                <div className="mt-4 pt-3 border-t border-yellow-100 flex justify-between items-center">
+                                    <div className="flex gap-2">
+                                        <div className="flex items-center gap-1 text-xs font-bold text-blue-400"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
+                                        <div className="flex items-center gap-1 text-xs font-bold text-pink-400"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => onHistory(jar)} className="p-2 bg-white text-gray-400 rounded-lg hover:text-gray-600 shadow-sm"><History size={16}/></button>
+                                        <button onClick={() => onDelete(jar.id)} className="p-2 bg-white text-gray-300 hover:text-red-400 rounded-lg shadow-sm"><Trash2 size={16}/></button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+        ) : (
+            // Active Jars View (Existing Grid)
+            <div className="grid gap-4">
+                {activeJars.map(jar => {
+                    const cur = Number(jar.currentAmount) || 0; 
+                    const tgt = Number(jar.targetAmount) || 1; 
+                    const progress = Math.min((cur / tgt) * 100, 100);
+                    const isAchieved = cur >= tgt;
+
+                    return (
+                    <div key={jar.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 relative overflow-hidden group flex flex-col">
+                        <div className="flex justify-between items-start mb-4 relative z-10">
+                            <div>
+                                <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                                    {jar.name}
+                                    <button onClick={() => onEdit(jar)} className="text-gray-300 hover:text-blue-500"><Pencil size={14}/></button>
+                                </h3>
+                                <div className="text-xs text-gray-400 mt-1">目標 {formatMoney(tgt)}</div>
+                            </div>
+                            <div className={`font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1 ${isAchieved ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                {isAchieved ? <CheckCircle size={12}/> : <Target size={12}/>} {Math.round(progress)}%
+                            </div>
+                        </div>
+                        
+                        <div className="mb-4 relative z-10">
+                            <div className="text-3xl font-black text-gray-800 mb-1">{formatMoney(cur)}</div>
+                            <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
+                                <div className={`h-full transition-all duration-1000 ${isAchieved ? 'bg-green-500' : 'bg-gradient-to-r from-yellow-300 to-orange-400'}`} style={{ width: `${progress}%` }}></div>
+                            </div>
+                        </div>
+                        
+                        <div className="flex justify-between items-center relative z-10 mb-4">
+                            <div className="flex gap-2">
+                                <div className="flex items-center gap-1 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-xs font-bold" title="男友貢獻"><span>👦</span><span>{formatMoney(jar.contributions?.bf || 0)}</span></div>
+                                <div className="flex items-center gap-1 bg-pink-50 text-pink-600 px-2 py-1 rounded-lg text-xs font-bold" title="女友貢獻"><span>👧</span><span>{formatMoney(jar.contributions?.gf || 0)}</span></div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => onHistory(jar)} className="p-2 bg-gray-100 text-gray-500 rounded-lg hover:bg-gray-200"><History size={18}/></button>
+                                <button onClick={() => onDelete(jar.id)} className="p-2 text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>
+                                <button onClick={() => onDeposit(jar.id)} className="bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-transform">存錢</button>
+                            </div>
+                        </div>
+
+                        {/* Complete Button */}
+                        <button 
+                            disabled={!isAchieved}
+                            onClick={() => onComplete(jar)}
+                            className={`w-full mt-auto py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all 
+                                ${isAchieved 
+                                    ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-white shadow-lg shadow-orange-200 active:scale-95 animate-pulse' 
+                                    : 'bg-gray-100 text-gray-300 cursor-not-allowed border border-gray-200'}`}
+                        >
+                            {isAchieved ? <><Trophy size={16}/> 達成目標！點擊完成</> : '尚未達成目標'}
+                        </button>
+
+                        <PiggyBank className="absolute -bottom-4 -right-4 text-gray-50 opacity-50 z-0 transform -rotate-12" size={120} />
+                    </div>
+                    );
+                })}
+                {activeJars.length === 0 && <div className="text-center py-10 text-gray-400">還沒有存錢計畫，快來建立一個！</div>}
+            </div>
+        )}
     </div>
-  </div>
-);
+  );
+};
 
 const ModalLayout = ({ title, onClose, children }) => (
   <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm animate-[fadeIn_0.2s]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1682,6 +1800,25 @@ export default function App() {
     });
   };
 
+  const handleCompleteJar = async (jar) => {
+    setConfirmModal({
+        isOpen: true,
+        title: "恭喜達成目標！🎉",
+        message: `確定要將「${jar.name}」標記為已完成嗎？這將會把它移至榮譽殿堂。`,
+        isDanger: false, 
+        onConfirm: async () => {
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'savings_jars', jar.id), {
+                    status: 'completed',
+                    completedAt: serverTimestamp()
+                });
+                showToast('目標達成！太棒了 🏆');
+                setConfirmModal({ isOpen: false });
+            } catch (e) { console.error(e); }
+        }
+    });
+  };
+
   const handleSaveBook = async (name, status = 'active') => {
       if(!user || !name.trim()) return;
       try {
@@ -1834,6 +1971,7 @@ export default function App() {
                 onDelete={handleDeleteJar} 
                 onHistory={(j) => setShowJarHistory(j)} 
                 onOpenRoulette={() => setShowRoulette(true)}
+                onComplete={handleCompleteJar}
             />
         )}
         {activeTab === 'gold' && (
