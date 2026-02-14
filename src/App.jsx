@@ -676,7 +676,7 @@ const RoleSelection = ({ onSelect }) => (
 const GoldView = ({ transactions, goldPrice, history, period, setPeriod, onAdd, onEdit, onDelete, loading, error, onRefresh, role, intraday }) => {
     // UI States for Collapsible Sections
     const [showConverter, setShowConverter] = useState(false);
-    const [showChart, setShowChart] = useState(true);
+    const [showChart, setShowChart] = useState(false);
 
     // Filter transactions by current user
     const myTransactions = transactions.filter(t => t.owner === role);
