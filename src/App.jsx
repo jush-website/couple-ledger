@@ -9,13 +9,13 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
 } from 'firebase/auth';
 import { 
-  Heart, Wallet, PiggyBank, PieChart as PieChartIcon, 
+  Heart, Wallet, PiggyBank, ChartPie, // Changed from PieChart to ChartPie
   Plus, Trash2, User, Calendar, Target, Settings, LogOut,
   RefreshCw, Pencil, CheckCircle, X, ChevronLeft, ChevronRight, 
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
-  Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users,
+  Camera, Archive, Reply, Loader2, Dices, Users,
   Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle,
-  Calculator, ChevronDown, ChevronUp, MousePointerClick, ArrowUpCircle, ArrowDownCircle, Trophy,
+  Calculator, ChevronDown, ChevronUp, Trophy,
   Moon, Coffee
 } from 'lucide-react';
 
@@ -516,7 +516,8 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
 
     // Check if it's weekend (0=Sun, 6=Sat)
     const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
-    const isMarketClosed = period === '1d' && (isWeekend || chartData.length === 0);
+    // 如果是週末且選即時，強制判定為休市
+    const isMarketClosed = period === '1d' && isWeekend;
 
     return (
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300 relative group">
@@ -579,7 +580,7 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
                         <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs">
                             <Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...
                         </div>
-                    ) : (isMarketClosed && chartData.length === 0) ? (
+                    ) : (isMarketClosed) ? (
                         <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 gap-3 bg-gray-50/50 rounded-2xl border border-gray-100/50">
                             <div className="bg-white p-3 rounded-full shadow-sm">
                                 <Coffee size={24} className="text-orange-300"/>
@@ -1213,7 +1214,6 @@ const Statistics = ({ transactions }) => {
   );
 };
 
-// --- Savings Component (Updated with Shared/Personal Tabs) ---
 const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette, onComplete }) => {
   const [viewCompleted, setViewCompleted] = useState(false);
   const [viewType, setViewType] = useState('shared'); // 'shared' or 'personal'
@@ -1693,12 +1693,7 @@ export default function App() {
           
           const data = await response.json();
           if (data.success) {
-              let price = data.currentPrice;
-              // Weekend check: if currentPrice is 0 or null, use last history price
-              if (!price && data.history && data.history.length > 0) {
-                  price = data.history[data.history.length - 1].price;
-              }
-              setGoldPrice(price);
+              setGoldPrice(data.currentPrice);
               setGoldHistory(data.history);
               setGoldIntraday(data.intraday || []); // 儲存即時走勢
           } else {
@@ -2164,7 +2159,7 @@ export default function App() {
       <div className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50">
         <div className="flex justify-around py-3 max-w-2xl mx-auto">
           <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
-          <NavBtn icon={PieChartIcon} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
+          <NavBtn icon={ChartPie} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
           <NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
           <NavBtn icon={Coins} label="黃金" active={activeTab === 'gold'} onClick={() => setActiveTab('gold')} role={role} />
           <NavBtn icon={Settings} label="設定" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} role={role} />
