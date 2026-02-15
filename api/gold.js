@@ -36,34 +36,38 @@ export default async function handler(req, res) {
 
     // --- 階段二：從 CSV 抓取「歷史日線走勢」 ---
     // 只有在確認網站存活 (HTML 成功) 後才嘗試抓 CSV，避免被連續阻擋
-    if (currentPrice > 0) {
-        try {
-            const csvResponse = await fetch('https://rate.bot.com.tw/gold/csv/0', { headers });
-            if (csvResponse.ok) {
-                const csvText = await csvResponse.text();
-                const rows = csvText.split('\n').filter(row => row.trim() !== '');
-                const dataRows = rows.slice(1); 
-                const parsedHistory = dataRows.map(row => {
-                    const columns = row.split(',');
-                    if (columns.length < 4) return null;
-                    const dateStr = columns[0].trim(); 
-                    const price = parseFloat(columns[3]); 
-                    if (!dateStr || isNaN(price) || dateStr.length < 8) return null;
-                    const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
-                    return {
-                        date: formattedDate,
-                        price: price,
-                        label: `${dateStr.substring(4, 6)}/${dateStr.substring(6, 8)}`
-                    };
-                }).filter(item => item !== null);
+    // 即使 currentPrice 是 0 (抓失敗)，也要嘗試抓歷史紀錄來當備援
+    try {
+        const csvResponse = await fetch('https://rate.bot.com.tw/gold/csv/0', { headers });
+        if (csvResponse.ok) {
+            const csvText = await csvResponse.text();
+            const rows = csvText.split('\n').filter(row => row.trim() !== '');
+            const dataRows = rows.slice(1); 
+            const parsedHistory = dataRows.map(row => {
+                const columns = row.split(',');
+                if (columns.length < 4) return null;
+                const dateStr = columns[0].trim(); 
+                const price = parseFloat(columns[3]); 
+                if (!dateStr || isNaN(price) || dateStr.length < 8) return null;
+                const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+                return {
+                    date: formattedDate,
+                    price: price,
+                    label: `${dateStr.substring(4, 6)}/${dateStr.substring(6, 8)}`
+                };
+            }).filter(item => item !== null);
 
-                if (parsedHistory.length > 0) {
-                    history = parsedHistory.reverse();
-                }
+            if (parsedHistory.length > 0) {
+                history = parsedHistory.reverse();
             }
-        } catch (e) {
-            console.warn("CSV Fetch failed:", e.message);
         }
+    } catch (e) {
+        console.warn("CSV Fetch failed:", e.message);
+    }
+
+    // 如果即時價格抓取失敗 (0)，嘗試用歷史紀錄的最後一筆 (昨日收盤價) 當作目前價格
+    if (!currentPrice && history.length > 0) {
+        currentPrice = history[history.length - 1].price;
     }
 
     // --- 階段三：抓取 Yahoo Finance 取得「當天即時走勢」 (Intraday) ---
@@ -105,7 +109,7 @@ export default async function handler(req, res) {
                      scaler = currentPrice / lastYahooPriceTwd;
                  } else {
                      scaler = 1.02; // 如果沒抓到台銀價格，預設溢價 2%
-                     // 如果階段一失敗，就用算的當作 Current Price
+                     // 如果 currentPrice 還是 0 (台銀跟歷史都失敗)，勉強用算出來的
                      if (!currentPrice) currentPrice = Math.floor(lastYahooPriceTwd * scaler);
                  }
 
@@ -159,7 +163,7 @@ export default async function handler(req, res) {
              console.error("History fallback failed", e);
          }
          
-         // 如果真的全都空，補一個單點避免前端壞掉
+         // 如果真的全都空，最後手段才補 2880
          if (!currentPrice) currentPrice = 2880; 
          if (history.length === 0) history = [{ date: new Date().toISOString().split('T')[0], price: currentPrice, label: 'Today' }];
     }
