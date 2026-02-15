@@ -15,7 +15,8 @@ import {
   ArrowLeft, ArrowRight, Check, History, Percent, Book, MoreHorizontal,
   Camera, Archive, Reply, Loader2, Image as ImageIcon, Dices, Users,
   Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle,
-  Calculator, ChevronDown, ChevronUp, MousePointerClick, ArrowUpCircle, ArrowDownCircle, Trophy
+  Calculator, ChevronDown, ChevronUp, MousePointerClick, ArrowUpCircle, ArrowDownCircle, Trophy,
+  Moon, Coffee
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -513,14 +514,27 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
     const pathD = points.length > 1 ? svgPath(points, bezierCommand) : '';
     const fillPathD = points.length > 1 ? `${pathD} L 100,100 L 0,100 Z` : '';
 
+    // Check if it's weekend (0=Sun, 6=Sat)
+    const isWeekend = new Date().getDay() === 0 || new Date().getDay() === 6;
+    const isMarketClosed = period === '1d' && (isWeekend || chartData.length === 0);
+
     return (
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-4 transition-all duration-300 relative group">
             {/* Header (Integrated Price Info & Toggle) */}
             <div className="p-5 flex justify-between items-start cursor-pointer hover:bg-gray-50/50 transition-colors" onClick={toggleVisibility}>
                 <div>
                     <div className="flex items-center gap-2 mb-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse"></div>
-                        <span className="text-sm font-bold text-gray-400">台銀賣出金價</span>
+                        {isMarketClosed ? (
+                            <>
+                                <div className="w-2.5 h-2.5 rounded-full bg-orange-400"></div>
+                                <span className="text-sm font-bold text-orange-500 flex items-center gap-1">休市中 <Moon size={12}/></span>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse"></div>
+                                <span className="text-sm font-bold text-gray-400">台銀賣出金價</span>
+                            </>
+                        )}
                     </div>
                     <div className="text-3xl font-black text-gray-800 tracking-tight">
                         {formatMoney(goldPrice)} <span className="text-sm text-gray-400 font-normal">/克</span>
@@ -565,10 +579,20 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
                         <div className="w-full h-48 flex items-center justify-center text-gray-400 text-xs">
                             <Loader2 className="animate-spin mr-2" size={16}/> 正在取得金價數據...
                         </div>
+                    ) : (isMarketClosed && chartData.length === 0) ? (
+                        <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 gap-3 bg-gray-50/50 rounded-2xl border border-gray-100/50">
+                            <div className="bg-white p-3 rounded-full shadow-sm">
+                                <Coffee size={24} className="text-orange-300"/>
+                            </div>
+                            <div className="text-center">
+                                <div className="text-xs font-bold text-gray-500">市場休市中</div>
+                                <div className="text-[10px] text-gray-400 mt-1">顯示最後收盤價格</div>
+                            </div>
+                        </div>
                     ) : (!chartData || chartData.length === 0) ? (
                         <div className="w-full h-48 flex flex-col items-center justify-center text-gray-300 text-xs gap-2">
                             <BarChart3 size={24} className="opacity-50"/>
-                            <span>{period === '1d' ? '今日尚無即時交易數據' : '尚無足夠的歷史數據'}</span>
+                            <span>尚無足夠的歷史數據</span>
                         </div>
                     ) : (
                         <div className="w-full h-48 relative select-none mt-2" 
@@ -1669,7 +1693,12 @@ export default function App() {
           
           const data = await response.json();
           if (data.success) {
-              setGoldPrice(data.currentPrice);
+              let price = data.currentPrice;
+              // Weekend check: if currentPrice is 0 or null, use last history price
+              if (!price && data.history && data.history.length > 0) {
+                  price = data.history[data.history.length - 1].price;
+              }
+              setGoldPrice(price);
               setGoldHistory(data.history);
               setGoldIntraday(data.intraday || []); // 儲存即時走勢
           } else {
