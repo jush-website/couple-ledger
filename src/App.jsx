@@ -533,7 +533,7 @@ const GoldChart = ({ data, intraday, period, loading, isVisible, toggleVisibilit
                         ) : (
                             <>
                                 <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse"></div>
-                                <span className="text-sm font-bold text-gray-400">台銀賣出金價</span>
+                                <span className="text-sm font-bold text-gray-400">賣出金價</span>
                             </>
                         )}
                     </div>
