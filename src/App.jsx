@@ -172,6 +172,23 @@ const getInitialAppId = () => {
 const rawAppId = getInitialAppId();
 const appId = rawAppId.replace(/\//g, '_').replace(/\./g, '_');
 
+// 💡 新增：從你的截圖中整理出的常見歷史 ID 清單
+const KNOWN_APP_IDS = [
+  "couple-ledger-pro",
+  "c_1fd1d29ae268f2da_CoupleLedgerApp_Pro_jsx-201",
+  "c_1fd1d29ae268f2da_CoupleLedgerApp_Pro_jsx-399",
+  "c_389f4b0e6873870c_App_jsx-292",
+  "c_80bf02e0e339fd70_CoupleLedgerApp_jsx-1b9",
+  "c_671b08e6b2080fa4_crc_CoupleLedgerApp_jsx-127",
+  "c_662b20b32f023162_crc_App_jsx-13",
+  "c_bd6880b1bbc614d3_App_jsx-228",
+  "c_96510e37f60fd002_CoupleLedgerApp_jsx-19f",
+  "c_bdebabf1d91bc831_index_jsx-1bb",
+  "c_12f0fb8ab9eaced8_CoupleLedgerApp_jsx-295",
+  "c_e2fa1a777a208d7c_App_jsx-2a7",
+  "default-app-id"
+];
+
 const CATEGORIES = [
   { id: 'food', name: '餐飲', color: '#FF8042' },
   { id: 'transport', name: '交通', color: '#00C49F' },
@@ -598,9 +615,9 @@ const Overview = ({ transactions, role, readOnly, onAdd, onEdit, onDelete, onSca
   );
 };
 
-// 💡 更新：在設定頁面加入系統診斷區塊
+// 💡 系統診斷區塊與快捷下拉選單
 const SettingsView = ({ role, onLogout, diagnostics }) => {
-  const [customId, setCustomId] = useState(rawAppId);
+  const [customId, setCustomId] = useState(diagnostics?.appId || '');
 
   const handleSwitchAppId = () => {
       if (!customId.trim()) return;
@@ -620,20 +637,32 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
       <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2 mb-4"><LogOut size={18} /> 切換身分 (登出)</button>
       
       <div className="mt-8 border-t border-gray-100 pt-6">
-        <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2"><Settings size={16}/> 找回舊資料 (資料夾切換器)</h3>
+        <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2"><Settings size={16}/> 找回舊資料 (快速切換)</h3>
         <div className="bg-blue-50 p-4 rounded-xl space-y-3 border border-blue-100">
-          <p className="text-xs text-blue-700 font-bold leading-relaxed">請將 Firebase 後台看到的資料夾名稱貼在下方，按切換即可立即讀取，不用再改程式碼！</p>
+          <p className="text-xs text-blue-700 font-bold leading-relaxed">我們從截圖中抓出了可能的資料夾，直接從下拉選單選擇試試看，不用慢慢貼囉！</p>
+          
+          <select 
+              value={KNOWN_APP_IDS.includes(customId) ? customId : ""}
+              onChange={(e) => setCustomId(e.target.value)}
+              className="w-full p-2 rounded-lg text-xs font-mono border border-blue-200 outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+          >
+              <option value="" disabled>-- 點擊展開歷史清單 --</option>
+              {KNOWN_APP_IDS.map(id => (
+                  <option key={id} value={id}>{id === customId ? '👉 ' : ''}{id}</option>
+              ))}
+          </select>
+
           <div className="flex gap-2">
             <input 
                 type="text" 
                 value={customId} 
                 onChange={(e) => setCustomId(e.target.value)} 
-                placeholder="例如: c_1fd1d2..."
+                placeholder="或手動輸入..."
                 className="flex-1 p-2 rounded-lg text-xs font-mono border border-blue-200 outline-none focus:ring-2 focus:ring-blue-400 bg-white"
             />
           </div>
           <div className="flex gap-2 mt-2">
-              <button onClick={handleSwitchAppId} className="flex-[2] py-2 bg-blue-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">切換並重新載入</button>
+              <button onClick={handleSwitchAppId} className="flex-[2] py-2 bg-blue-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">切換並載入</button>
               <button onClick={handleResetAppId} className="flex-1 py-2 px-3 bg-white text-gray-500 rounded-lg text-xs font-bold border border-gray-200 active:scale-95 transition-transform">恢復預設</button>
           </div>
         </div>
@@ -644,20 +673,20 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
         <div className="bg-gray-50 p-4 rounded-xl space-y-3 text-xs">
           <div className="flex justify-between items-center">
             <span className="text-gray-500">資料庫連線</span>
-            <span className={diagnostics.dbError ? 'text-red-500 font-bold' : 'text-green-500 font-bold'}>
-              {diagnostics.dbError ? '連線被拒' : '連線成功'}
+            <span className={diagnostics?.dbError ? 'text-red-500 font-bold' : 'text-green-500 font-bold'}>
+              {diagnostics?.dbError ? '連線被拒' : '連線成功'}
             </span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-gray-500">目前的資料夾 ID</span>
-            <span className="text-gray-700 font-mono font-bold bg-white px-2 py-1 rounded border border-gray-200 overflow-hidden text-ellipsis max-w-[140px] whitespace-nowrap" title={diagnostics.appId}>{diagnostics.appId}</span>
+            <span className="text-gray-700 font-mono font-bold bg-white px-2 py-1 rounded border border-gray-200 overflow-hidden text-ellipsis max-w-[140px] whitespace-nowrap" title={diagnostics?.appId}>{diagnostics?.appId}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-gray-500">載入的帳本 / 紀錄</span>
-            <span className="text-gray-700 font-bold">{diagnostics.booksCount} 本 / {diagnostics.transCount} 筆</span>
+            <span className="text-gray-700 font-bold">{diagnostics?.booksCount || 0} 本 / {diagnostics?.transCount || 0} 筆</span>
           </div>
-          {diagnostics.dbError && (
-             <div className="mt-2 p-3 bg-red-100 text-red-600 rounded-lg font-bold break-words">{diagnostics.dbError}</div>
+          {diagnostics?.dbError && (
+             <div className="mt-2 p-3 bg-red-100 text-red-600 rounded-lg font-bold break-words">{diagnostics?.dbError}</div>
           )}
         </div>
       </div>
@@ -1186,7 +1215,7 @@ export default function App() {
     <div className="min-h-screen w-full bg-gray-50 font-sans text-gray-800 pb-24">
       <style>{`.hide-scrollbar::-webkit-scrollbar { display: none; }`}</style>
       
-      {/* ⚠️ 新增的錯誤橫幅，可以精準找出權限過期問題 */}
+      {/* ⚠️ 錯誤橫幅 */}
       {(authError || dbError) && (
         <div className="bg-red-500 text-white p-3 text-sm font-bold text-center z-50 relative flex items-center justify-center gap-2 shadow-md">
             <AlertCircle size={18} />
