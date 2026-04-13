@@ -212,7 +212,7 @@ try {
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'couple-ledger-pro';
 const appId = rawAppId.replace(/\//g, '_').replace(/\./g, '_');
 
 const CATEGORIES = [
