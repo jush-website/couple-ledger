@@ -632,7 +632,7 @@ const Overview = ({ transactions, role, readOnly, onAdd, onEdit, onDelete, onSca
   );
 };
 
-// 💡 更新：加入強大的「自動掃描器」功能
+// 💡 更新：加入強大的「自動掃描與資料合併」功能
 const SettingsView = ({ role, onLogout, diagnostics }) => {
   const [customId, setCustomId] = useState(diagnostics?.appId || '');
   const [isScanning, setIsScanning] = useState(false);
@@ -649,6 +649,59 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
       window.location.reload();
   };
 
+  const handleMergeData = async (sourceAppId) => {
+      const confirmMsg = `確定要把 ${sourceAppId.slice(0, 10)}... 裡面的所有資料，合併搬到目前的帳號嗎？\n\n這會複製該資料夾的：\n✅ 所有帳本\n✅ 所有記帳紀錄\n✅ 存錢罐\n✅ 黃金紀錄`;
+      if (!window.confirm(confirmMsg)) return;
+
+      setIsScanning(true);
+      try {
+          const db = getFirestore();
+          const targetAppId = diagnostics.appId;
+
+          // 1. 合併帳本 (Books) 並記錄新舊 ID 對應
+          const booksRef = collection(db, 'artifacts', sourceAppId, 'public', 'data', 'books');
+          const booksSnap = await getDocs(booksRef);
+          const bookIdMap = {};
+          for (const docSnap of booksSnap.docs) {
+              const data = docSnap.data();
+              const newRef = await addDoc(collection(db, 'artifacts', targetAppId, 'public', 'data', 'books'), data);
+              bookIdMap[docSnap.id] = newRef.id;
+          }
+
+          // 2. 合併交易紀錄 (Transactions) 並更新 BookId
+          const transRef = collection(db, 'artifacts', sourceAppId, 'public', 'data', 'transactions');
+          const transSnap = await getDocs(transRef);
+          for (const docSnap of transSnap.docs) {
+              const data = docSnap.data();
+              if (data.bookId && bookIdMap[data.bookId]) {
+                  data.bookId = bookIdMap[data.bookId];
+              }
+              await addDoc(collection(db, 'artifacts', targetAppId, 'public', 'data', 'transactions'), data);
+          }
+
+          // 3. 合併存錢罐 (Jars)
+          const jarsRef = collection(db, 'artifacts', sourceAppId, 'public', 'data', 'savings_jars');
+          const jarsSnap = await getDocs(jarsRef);
+          for (const docSnap of jarsSnap.docs) {
+              await addDoc(collection(db, 'artifacts', targetAppId, 'public', 'data', 'savings_jars'), docSnap.data());
+          }
+
+          // 4. 合併黃金紀錄 (Gold)
+          const goldRef = collection(db, 'artifacts', sourceAppId, 'public', 'data', 'gold_transactions');
+          const goldSnap = await getDocs(goldRef);
+          for (const docSnap of goldSnap.docs) {
+              await addDoc(collection(db, 'artifacts', targetAppId, 'public', 'data', 'gold_transactions'), docSnap.data());
+          }
+
+          alert("✅ 合併大成功！你的舊資料已經全部搬過來了！");
+      } catch (e) {
+          console.error(e);
+          alert("❌ 合併發生錯誤：" + e.message);
+      }
+      setIsScanning(false);
+      window.location.reload();
+  };
+
   // 一鍵掃描功能：拜訪已知清單找回資料
   const handleScanAll = async () => {
       setIsScanning(true);
@@ -657,15 +710,18 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
       const db = getFirestore();
       
       for (const id of KNOWN_APP_IDS) {
+          if (id === diagnostics?.appId) continue; // 跳過目前的資料夾
           try {
-              // 嘗試讀取該資料夾底下的 transactions
-              const q = collection(db, 'artifacts', id, 'public', 'data', 'transactions');
-              const snap = await getDocs(q);
-              if (!snap.empty) {
-                  results.push({ id, count: snap.size });
+              const qBooks = collection(db, 'artifacts', id, 'public', 'data', 'books');
+              const snapBooks = await getDocs(qBooks);
+              const qTrans = collection(db, 'artifacts', id, 'public', 'data', 'transactions');
+              const snapTrans = await getDocs(qTrans);
+              
+              if (!snapTrans.empty || !snapBooks.empty) {
+                  results.push({ id, booksCount: snapBooks.size, transCount: snapTrans.size });
               }
           } catch (e) {
-              // 如果報錯 (可能權限沒開) 則忽略繼續下一個
+              // 忽略權限錯誤
           }
       }
       setScanResults(results);
@@ -680,10 +736,10 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
       
       {/* --- 自動掃描區塊 --- */}
       <div className="mt-8 border-t border-gray-100 pt-6">
-        <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2"><Search size={16}/> 自動全網掃描舊資料</h3>
+        <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2"><Search size={16}/> 全自動掃描與合併舊資料</h3>
         <div className="bg-purple-50 p-4 rounded-xl space-y-3 border border-purple-100">
           <p className="text-xs text-purple-700 font-bold leading-relaxed">
-            系統無法直接列出所有資料，但我們可以「一鍵掃描」所有已知的歷史資料夾，幫你把舊紀錄找出來！
+            如果你發現帳本不見了，可能是因為系統分配了多個隨機資料夾。點擊掃描把散落的資料找出來，然後一鍵把它們「合併」到目前的金庫裡吧！
           </p>
 
           <button 
@@ -692,31 +748,43 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
               className="w-full py-3 bg-purple-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
           >
               {isScanning ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-              {isScanning ? '正在掃描每個資料夾...' : '🚀 開始掃描我的舊資料'}
+              {isScanning ? '正在掃描每個歷史角落...' : '🚀 開始掃描我的舊資料'}
           </button>
 
           {scanResults && (
               <div className="mt-4 space-y-2 animate-[fadeIn_0.3s]">
                   <div className="text-xs font-bold text-gray-500 mb-2">掃描結果：</div>
                   {scanResults.length === 0 ? (
-                      <div className="text-sm text-red-500 font-bold text-center py-2">找不到任何紀錄 😢</div>
+                      <div className="text-sm text-red-500 font-bold text-center py-2">找不到其他紀錄 😢</div>
                   ) : (
                       scanResults.map(res => (
-                          <div key={res.id} className="bg-white p-3 rounded-lg border border-purple-100 flex items-center justify-between shadow-sm">
-                              <div className="min-w-0 flex-1 pr-2">
-                                  <div className="text-sm font-bold text-gray-800">找到 {res.count} 筆紀錄 🎉</div>
-                                  <div className="text-[10px] text-gray-400 font-mono truncate">{res.id}</div>
+                          <div key={res.id} className="bg-white p-3 rounded-lg border border-purple-100 shadow-sm flex flex-col gap-2">
+                              <div className="flex justify-between items-start">
+                                  <div className="min-w-0 pr-2">
+                                      <div className="text-sm font-bold text-gray-800">
+                                        找到 {res.booksCount} 本帳本, {res.transCount} 筆紀錄 🎉
+                                      </div>
+                                      <div className="text-[10px] text-gray-400 font-mono truncate" title={res.id}>資料夾: {res.id}</div>
+                                  </div>
                               </div>
-                              <button 
-                                  onClick={() => {
-                                      setCustomId(res.id);
-                                      localStorage.setItem('custom_app_id', res.id);
-                                      window.location.reload();
-                                  }}
-                                  className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold whitespace-nowrap active:scale-95"
-                              >
-                                  載入
-                              </button>
+                              <div className="flex gap-2 mt-1">
+                                  <button 
+                                      onClick={() => {
+                                          setCustomId(res.id);
+                                          localStorage.setItem('custom_app_id', res.id);
+                                          window.location.reload();
+                                      }}
+                                      className="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold active:scale-95 transition-transform"
+                                  >
+                                      過去查看
+                                  </button>
+                                  <button 
+                                      onClick={() => handleMergeData(res.id)}
+                                      className="flex-[1.5] py-2 bg-purple-500 text-white rounded-lg text-xs font-bold shadow-sm shadow-purple-200 active:scale-95 transition-transform flex items-center justify-center gap-1"
+                                  >
+                                      ➕ 合併過來
+                                  </button>
+                              </div>
                           </div>
                       ))
                   )}
