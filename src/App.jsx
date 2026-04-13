@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
   deleteDoc, doc, updateDoc, serverTimestamp,
-  writeBatch, query, where, getDocs
+  writeBatch, query, where, getDocs, collectionGroup
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
@@ -728,6 +728,51 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
       setIsScanning(false);
   };
 
+  // 💡 新增：深度打撈功能 (跨資料夾無差別搜尋)
+  const handleDeepScan = async () => {
+      setIsScanning(true);
+      setScanResults(null);
+      try {
+          const db = getFirestore();
+          // 無視資料夾名稱，直接找出全網所有名為 transactions 的集合
+          const transGroup = collectionGroup(db, 'transactions');
+          const snap = await getDocs(transGroup);
+
+          const idCounts = {};
+          snap.forEach(doc => {
+              const pathParts = doc.ref.path.split('/');
+              // 路徑結構：artifacts/{appId}/public/data/transactions/{docId}
+              if (pathParts.length >= 6 && pathParts[0] === 'artifacts') {
+                  const foundId = pathParts[1];
+                  if (foundId !== diagnostics?.appId) {
+                      idCounts[foundId] = (idCounts[foundId] || 0) + 1;
+                  }
+              }
+          });
+
+          const results = Object.keys(idCounts).map(id => ({
+              id,
+              transCount: idCounts[id],
+              booksCount: '未知' 
+          }));
+
+          setScanResults(results);
+          if (results.length === 0) {
+              alert("深度打撈結束：在資料庫中沒有找到任何其他紀錄 😢");
+          } else {
+              alert(`成功！找到了 ${results.length} 個隱藏的資料夾有紀錄！`);
+          }
+      } catch (e) {
+          console.error(e);
+          if (e.message.includes('Index') || e.message.includes('permission')) {
+              alert("深度打撈失敗：Firebase 權限不足。請確保您的 Firestore 規則已經完全開放 (allow read, write: if true;)。");
+          } else {
+              alert("打撈發生錯誤：" + e.message);
+          }
+      }
+      setIsScanning(false);
+  };
+
   return (
   <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
@@ -742,14 +787,26 @@ const SettingsView = ({ role, onLogout, diagnostics }) => {
             如果你發現帳本不見了，可能是因為系統分配了多個隨機資料夾。點擊掃描把散落的資料找出來，然後一鍵把它們「合併」到目前的金庫裡吧！
           </p>
 
-          <button 
-              onClick={handleScanAll} 
-              disabled={isScanning}
-              className="w-full py-3 bg-purple-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-              {isScanning ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
-              {isScanning ? '正在掃描每個歷史角落...' : '🚀 開始掃描我的舊資料'}
-          </button>
+          <div className="flex gap-2">
+              <button 
+                  onClick={handleScanAll} 
+                  disabled={isScanning}
+                  className="flex-1 py-3 bg-purple-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-purple-200 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                  {isScanning ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                  一般掃描
+              </button>
+              
+              <button 
+                  onClick={handleDeepScan} 
+                  disabled={isScanning}
+                  className="flex-[1.2] py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  title="無視名稱，直接地毯式搜尋整個資料庫"
+              >
+                  {isScanning ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+                  雷達深度打撈
+              </button>
+          </div>
 
           {scanResults && (
               <div className="mt-4 space-y-2 animate-[fadeIn_0.3s]">
