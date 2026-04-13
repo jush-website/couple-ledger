@@ -17,7 +17,7 @@ import {
   Camera, Archive, Reply, Loader2, Dices, Users,
   Coins, TrendingUp, TrendingDown, BarChart3, RefreshCcw, Scale, Store, Tag, AlertCircle,
   Calculator, ChevronDown, ChevronUp, Trophy,
-  Moon, Coffee, LogIn, Copy
+  Moon, Coffee, LogIn, Copy, Database, Download, UploadCloud
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -187,9 +187,7 @@ const compressImage = (base64Str, maxWidth = 800, quality = 0.6) => {
 let app;
 try {
   app = initializeApp(firebaseConfig);
-} catch (e) {
-  // Ignore
-}
+} catch (e) {}
 const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
@@ -228,12 +226,11 @@ const AppLoading = () => (
   </div>
 );
 
-// --- Auth & Pairing Component (NEW) ---
 const AuthAndPairing = ({ user, onGoogleLogin, onComplete }) => {
     const [step, setStep] = useState(user ? 'mode' : 'login');
-    const [mode, setMode] = useState(null); // 'create' or 'join'
+    const [mode, setMode] = useState(null); 
     const [joinCode, setJoinCode] = useState('');
-    const [role, setRole] = useState(null); // 'bf' or 'gf'
+    const [role, setRole] = useState(null); 
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -265,12 +262,8 @@ const AuthAndPairing = ({ user, onGoogleLogin, onComplete }) => {
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 to-blue-50 p-6">
             <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none"><Heart size={120}/></div>
-                
-                <h1 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2">
-                    <Heart className="text-pink-500" fill="currentColor" size={24}/> 我們的小金庫
-                </h1>
+                <h1 className="text-2xl font-black text-gray-800 mb-2 flex items-center gap-2"><Heart className="text-pink-500" fill="currentColor" size={24}/> 我們的小金庫</h1>
                 <p className="text-sm text-gray-500 mb-8 font-medium">情侶專屬的共同記帳與存錢空間</p>
-
                 {step === 'login' && (
                     <div className="space-y-4 animate-[fadeIn_0.3s]">
                         <button onClick={onGoogleLogin} className="w-full py-4 bg-white border-2 border-gray-100 hover:bg-gray-50 text-gray-800 rounded-2xl font-bold flex items-center justify-center gap-3 active:scale-95 transition-all shadow-sm">
@@ -279,74 +272,32 @@ const AuthAndPairing = ({ user, onGoogleLogin, onComplete }) => {
                         </button>
                     </div>
                 )}
-
                 {step === 'mode' && (
                     <div className="space-y-4 animate-[fadeIn_0.3s]">
                         <h2 className="text-lg font-bold text-gray-700 mb-4">歡迎, {user?.displayName}！</h2>
-                        <button onClick={() => { setMode('create'); setStep('role'); }} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200 active:scale-95 transition-all flex items-center justify-center gap-2 text-lg">
-                            <Plus size={20}/> 建立專屬新空間
-                        </button>
-                        <div className="flex items-center gap-4 my-2 opacity-50">
-                            <div className="flex-1 h-px bg-gray-300"></div>
-                            <span className="text-xs font-bold">或者</span>
-                            <div className="flex-1 h-px bg-gray-300"></div>
-                        </div>
-                        <button onClick={() => { setMode('join'); setStep('join'); }} className="w-full py-4 bg-white border-2 border-gray-200 text-gray-700 rounded-2xl font-bold shadow-sm hover:bg-gray-50 active:scale-95 transition-all flex items-center justify-center gap-2 text-lg">
-                            <Users size={20}/> 加入另一半的空間
-                        </button>
+                        <button onClick={() => { setMode('create'); setStep('role'); }} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg shadow-gray-200 active:scale-95 transition-all flex items-center justify-center gap-2 text-lg"><Plus size={20}/> 建立專屬新空間</button>
+                        <div className="flex items-center gap-4 my-2 opacity-50"><div className="flex-1 h-px bg-gray-300"></div><span className="text-xs font-bold">或者</span><div className="flex-1 h-px bg-gray-300"></div></div>
+                        <button onClick={() => { setMode('join'); setStep('join'); }} className="w-full py-4 bg-white border-2 border-gray-200 text-gray-700 rounded-2xl font-bold shadow-sm hover:bg-gray-50 active:scale-95 transition-all flex items-center justify-center gap-2 text-lg"><Users size={20}/> 加入另一半的空間</button>
                     </div>
                 )}
-
                 {step === 'join' && (
                     <div className="space-y-4 animate-[fadeIn_0.3s]">
                         <button onClick={() => setStep('mode')} className="text-gray-400 mb-2 hover:text-gray-600"><ArrowLeft size={20}/></button>
                         <h2 className="text-lg font-bold text-gray-700 mb-2">請輸入配對碼</h2>
                         <p className="text-xs text-gray-500 mb-4">請另一半在他的「設定」頁面中複製配對碼給您。</p>
-                        <input 
-                            type="text" 
-                            value={joinCode} 
-                            onChange={(e) => setJoinCode(e.target.value)}
-                            placeholder="貼上配對碼..."
-                            className="w-full bg-gray-50 p-4 rounded-xl border-2 border-transparent focus:border-purple-200 outline-none text-center font-bold tracking-wider"
-                        />
-                        <button 
-                            disabled={!joinCode.trim()} 
-                            onClick={() => setStep('role')} 
-                            className="w-full py-4 mt-2 bg-purple-600 text-white rounded-2xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-all"
-                        >
-                            下一步
-                        </button>
+                        <input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="貼上配對碼..." className="w-full bg-gray-50 p-4 rounded-xl border-2 border-transparent focus:border-purple-200 outline-none text-center font-bold tracking-wider"/>
+                        <button disabled={!joinCode.trim()} onClick={() => setStep('role')} className="w-full py-4 mt-2 bg-purple-600 text-white rounded-2xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-all">下一步</button>
                     </div>
                 )}
-
                 {step === 'role' && (
                     <div className="space-y-4 animate-[fadeIn_0.3s]">
                         <button onClick={() => setStep(mode === 'join' ? 'join' : 'mode')} className="text-gray-400 mb-2 hover:text-gray-600"><ArrowLeft size={20}/></button>
                         <h2 className="text-lg font-bold text-gray-700 mb-4">您是哪一位呢？</h2>
                         <div className="grid grid-cols-2 gap-3 mb-6">
-                            <button 
-                                onClick={() => setRole('bf')}
-                                className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${role === 'bf' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-100 bg-white text-gray-400 hover:bg-gray-50'}`}
-                            >
-                                <span className="text-4xl">👦</span>
-                                <span className="font-bold">男朋友</span>
-                            </button>
-                            <button 
-                                onClick={() => setRole('gf')}
-                                className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${role === 'gf' ? 'border-pink-500 bg-pink-50 text-pink-700 shadow-sm' : 'border-gray-100 bg-white text-gray-400 hover:bg-gray-50'}`}
-                            >
-                                <span className="text-4xl">👧</span>
-                                <span className="font-bold">女朋友</span>
-                            </button>
+                            <button onClick={() => setRole('bf')} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${role === 'bf' ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm' : 'border-gray-100 bg-white text-gray-400 hover:bg-gray-50'}`}><span className="text-4xl">👦</span><span className="font-bold">男朋友</span></button>
+                            <button onClick={() => setRole('gf')} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all ${role === 'gf' ? 'border-pink-500 bg-pink-50 text-pink-700 shadow-sm' : 'border-gray-100 bg-white text-gray-400 hover:bg-gray-50'}`}><span className="text-4xl">👧</span><span className="font-bold">女朋友</span></button>
                         </div>
-                        <button 
-                            disabled={!role || loading} 
-                            onClick={handleSaveProfile} 
-                            className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2"
-                        >
-                            {loading ? <Loader2 className="animate-spin" size={20}/> : <CheckCircle size={20}/>}
-                            完成設定並開始使用
-                        </button>
+                        <button disabled={!role || loading} onClick={handleSaveProfile} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-lg disabled:opacity-50 active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={20}/> : <CheckCircle size={20}/>} 完成設定並開始使用</button>
                     </div>
                 )}
             </div>
@@ -354,7 +305,6 @@ const AuthAndPairing = ({ user, onGoogleLogin, onComplete }) => {
     );
 };
 
-// ... (CalculatorKeypad, SimpleDonutChart, GoldConverter, GoldChart, NavBtn remain unchanged)
 const CalculatorKeypad = ({ value, onChange, onConfirm, compact = false }) => {
   const handlePress = (key) => {
     const strVal = (value || '').toString();
@@ -379,10 +329,7 @@ const CalculatorKeypad = ({ value, onChange, onConfirm, compact = false }) => {
     <div className={`bg-gray-50 p-2 rounded-2xl select-none ${compact ? 'mt-1' : 'mt-4'}`}>
       <div className="grid grid-cols-4 gap-2 mb-2">
         {keys.map((k, i) => (
-          <button
-            key={i} type="button" onClick={(e) => { e.stopPropagation(); handlePress(k.val || k.label); }}
-            className={`${compact ? 'h-9 text-base' : 'h-11 text-lg'} rounded-xl font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center ${k.type === 'op' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-700'} ${k.color || ''}`}
-          >{k.label}</button>
+          <button key={i} type="button" onClick={(e) => { e.stopPropagation(); handlePress(k.val || k.label); }} className={`${compact ? 'h-9 text-base' : 'h-11 text-lg'} rounded-xl font-bold shadow-sm active:scale-95 transition-transform flex items-center justify-center ${k.type === 'op' ? 'bg-blue-100 text-blue-600' : 'bg-white text-gray-700'} ${k.color || ''}`}>{k.label}</button>
         ))}
       </div>
       <div className="flex gap-2">
@@ -570,11 +517,13 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
     });
     return bfLent;
   }, [transactions]);
+  
   const grouped = useMemo(() => {
     const groups = {};
     transactions.forEach(t => { if (!t.date) return; if (!groups[t.date]) groups[t.date] = []; groups[t.date].push(t); });
     return Object.entries(groups).sort((a, b) => new Date(b[0]) - new Date(a[0]));
   }, [transactions]);
+
   return (
     <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center relative overflow-hidden">
@@ -591,7 +540,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
             <div key={date} className="space-y-2">
               <div className="flex items-center justify-between mb-2 mt-4 px-2"><div className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">{date}</div><div className="flex gap-3 text-xs font-bold bg-white px-2 py-1 rounded-full border border-gray-100 shadow-sm"><span className="text-blue-600 flex items-center gap-1">👦 {formatMoney(daily.bf)}</span><span className="text-gray-300">|</span><span className="text-pink-600 flex items-center gap-1">👧 {formatMoney(daily.gf)}</span></div></div>
               {items.map(t => (
-                <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between transition-colors ${readOnly ? '' : 'active:bg-gray-50'}`}>
+                <div key={t.id} onClick={() => onEdit(t)} className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between transition-colors ${readOnly ? '' : 'active:bg-gray-50 cursor-pointer'}`}>
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: CATEGORIES.find(c => c.id === t.category)?.color || '#999' }}>{t.category === 'repayment' ? <RefreshCw size={18} /> : (t.category === 'food' ? <span className="text-lg">🍔</span> : <span className="text-lg">🏷️</span>)}</div>
                     <div className="min-w-0 flex-1"><div className="font-bold text-gray-800 truncate">{t.note || (CATEGORIES.find(c => c.id === t.category)?.name || '未知')}</div><div className="text-xs text-gray-400 flex gap-1 truncate"><span className={t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span><span>•</span><span>{t.category === 'repayment' ? '還款結清' : (t.splitType === 'shared' ? '平分' : (t.splitType === 'bf_personal' ? '男友個人' : (t.splitType === 'gf_personal' ? '女友個人' : (t.splitType === 'ratio' ? `比例 (${Math.round((t.splitDetails?.bf / (Number(t.amount)||1))*100)}%)` : '自訂分帳'))))}</span></div></div>
@@ -606,7 +555,10 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
   );
 };
 
-const SettingsView = ({ role, coupleId, onLogout, onCopyCode }) => (
+const SettingsView = ({ role, coupleId, onLogout, onCopyCode, onExport, onImport, autoBackupTime, onRestoreAutoBackup }) => {
+  const fileInputRef = useRef(null);
+  
+  return (
   <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
       <div className="flex items-center gap-4 mb-6"><div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl ${role === 'bf' ? 'bg-blue-100' : 'bg-pink-100'}`}>{role === 'bf' ? '👦' : '👧'}</div><div><h2 className="font-bold text-xl">{role === 'bf' ? '男朋友' : '女朋友'}</h2><p className="text-gray-400 text-sm">目前登入身分</p></div></div>
@@ -620,10 +572,38 @@ const SettingsView = ({ role, coupleId, onLogout, onCopyCode }) => (
         <p className="text-[10px] text-gray-400 mt-2">將此代碼分享給另一半，讓對方加入這個空間。</p>
       </div>
 
+      <div className="bg-gray-50 p-4 rounded-2xl mb-6">
+          <p className="text-xs font-bold text-gray-500 mb-3 flex items-center gap-1"><Database size={14}/> 資料安全與備份</p>
+          <div className="grid grid-cols-2 gap-3">
+              <button onClick={onExport} className="flex flex-col items-center justify-center gap-2 bg-white p-3 rounded-xl border border-gray-200 shadow-sm hover:border-blue-300 transition-all active:scale-95">
+                  <Download size={20} className="text-blue-500" />
+                  <span className="text-xs font-bold text-gray-700">下載備份檔</span>
+              </button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center gap-2 bg-white p-3 rounded-xl border border-gray-200 shadow-sm hover:border-green-300 transition-all active:scale-95">
+                  <UploadCloud size={20} className="text-green-500" />
+                  <span className="text-xs font-bold text-gray-700">還原備份</span>
+              </button>
+              <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={onImport} />
+          </div>
+          {autoBackupTime && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-between">
+                  <div>
+                      <div className="text-[10px] text-blue-500 font-bold mb-0.5">本機設備自動備份</div>
+                      <div className="text-xs font-bold text-blue-700">{new Date(autoBackupTime).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
+                  <button onClick={onRestoreAutoBackup} className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-sm active:scale-95 transition-transform">
+                      一鍵還原
+                  </button>
+              </div>
+          )}
+          <p className="text-[10px] text-gray-400 mt-3 leading-relaxed">Firebase 雲端很安全，但為防止您不小心誤刪，系統已開啟本機自動備份，您也可以定期下載 <b>.json</b> 備份檔。</p>
+      </div>
+
       <button onClick={onLogout} className="w-full py-3 bg-red-50 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2"><LogOut size={18} /> 登出</button>
     </div>
   </div>
-);
+  );
+};
 
 const Statistics = ({ transactions }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -839,7 +819,7 @@ const RepaymentModal = ({ debt, onClose, onSave }) => {
 export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null); // { coupleId, role, ... }
+  const [profile, setProfile] = useState(null); 
   
   const [activeTab, setActiveTab] = useState('overview');
   const [transactions, setTransactions] = useState([]);
@@ -867,6 +847,7 @@ export default function App() {
     
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
+  const [autoBackupTime, setAutoBackupTime] = useState(null);
 
   // Gold Data State
   const [goldPrice, setGoldPrice] = useState(0); 
@@ -884,7 +865,6 @@ export default function App() {
     }
 
     const initAuth = async () => {
-      // Allow custom token fallback for iframe environment if needed
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
          try { await signInWithCustomToken(auth, __initial_auth_token); } catch(e) {}
       }
@@ -924,15 +904,139 @@ export default function App() {
           const data = await response.json();
           if (data.success) {
               let price = data.currentPrice;
-              if (!price && data.history && data.history.length > 0) price = data.history[data.history.length - 1].price;
-              setGoldPrice(price); setGoldHistory(data.history); setGoldIntraday(data.intraday || []);
+              let fetchedHistory = [...(data.history || [])];
+              let fetchedIntraday = [...(data.intraday || [])];
+              
+              if (!price && fetchedHistory.length > 0) {
+                  price = fetchedHistory[fetchedHistory.length - 1].price;
+              }
+
+              try {
+                  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date()); 
+                  if (fetchedHistory.length > 0 && price > 0) {
+                      const lastItem = fetchedHistory[fetchedHistory.length - 1];
+                      if (lastItem.date !== todayStr) {
+                          fetchedHistory.push({ date: todayStr, price: price, label: '今日' });
+                      } else {
+                          lastItem.price = price;
+                          lastItem.label = '今日';
+                      }
+                  }
+                  
+                  if (fetchedIntraday.length === 0 && price > 0) {
+                      const now = new Date();
+                      fetchedIntraday = [{ 
+                          date: now.toISOString(), 
+                          price: price, 
+                          label: now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false }) 
+                      }];
+                  }
+              } catch (dateErr) {
+                  console.warn("Date formatting error", dateErr);
+              }
+
+              setGoldPrice(price); 
+              setGoldHistory(fetchedHistory); 
+              setGoldIntraday(fetchedIntraday);
           } else { throw new Error(data.error || '無法讀取資料'); }
       } catch (err) {
           console.error("Gold Fetch Error:", err);
-          setGoldError(`台銀連線失敗: ${err.message}`);
+          setGoldError(`資料連線失敗: ${err.message}`);
           setGoldPrice(2880); setGoldHistory([{date:'-', price: 2880, label: '-'}]);
       } finally { setGoldLoading(false); }
   };
+
+  // --- 本機設備自動備份邏輯 ---
+  useEffect(() => {
+      if (!profile?.coupleId || loadingAuth) return;
+      // 不要備份剛載入時的空資料
+      if (books.length === 0 && transactions.length === 0 && jars.length === 0) return;
+
+      const backupData = {
+          timestamp: new Date().toISOString(),
+          version: 1,
+          data: {
+              books,
+              transactions,
+              savings_jars: jars,
+              gold_transactions: goldTransactions
+          }
+      };
+      
+      try {
+          localStorage.setItem(`auto_backup_${profile.coupleId}`, JSON.stringify(backupData));
+          setAutoBackupTime(backupData.timestamp);
+      } catch (e) {
+          console.error("Auto backup failed", e);
+      }
+  }, [books, transactions, jars, goldTransactions, profile?.coupleId, loadingAuth]);
+
+  useEffect(() => {
+      if (profile?.coupleId) {
+          try {
+              const stored = localStorage.getItem(`auto_backup_${profile.coupleId}`);
+              if (stored) {
+                  const parsed = JSON.parse(stored);
+                  setAutoBackupTime(parsed.timestamp);
+              }
+          } catch(e) {}
+      }
+  }, [profile?.coupleId]);
+
+  const handleRestoreAutoBackup = () => {
+      if (!profile?.coupleId) return;
+      const stored = localStorage.getItem(`auto_backup_${profile.coupleId}`);
+      if (!stored) {
+          showToast('找不到自動備份檔 ❌');
+          return;
+      }
+      try {
+          const backup = JSON.parse(stored);
+          const backupDate = new Date(backup.timestamp).toLocaleString('zh-TW');
+          
+          setConfirmModal({
+              isOpen: true,
+              title: "⚠️ 警告：還原本機自動備份",
+              message: `系統找到了這台裝置在 ${backupDate} 自動儲存的備份。確定要用它來覆蓋目前的雲端資料嗎？`,
+              isDanger: true,
+              onConfirm: async () => {
+                  setConfirmModal({ isOpen: false });
+                  showToast('正在從裝置還原資料... ⏳');
+                  try {
+                      const cid = profile.coupleId;
+                      let batch = writeBatch(db);
+                      let count = 0;
+                      
+                      const collectionsToBackup = ['books', 'transactions', 'savings_jars', 'gold_transactions'];
+                      for (const col of collectionsToBackup) {
+                          if (backup.data[col]) {
+                              for (const item of backup.data[col]) {
+                                  const docData = { ...item };
+                                  delete docData.id; 
+                                  const ref = doc(db, 'artifacts', appId, 'public', 'data', `${col}_${cid}`, item.id);
+                                  batch.set(ref, docData);
+                                  count++;
+                                  if (count >= 400) { 
+                                      await batch.commit();
+                                      batch = writeBatch(db);
+                                      count = 0;
+                                  }
+                              }
+                          }
+                      }
+                      if (count > 0) await batch.commit();
+                      showToast('自動備份還原成功！🎉');
+                  } catch (err) {
+                      console.error(err);
+                      showToast('還原過程發生錯誤 ❌');
+                  }
+              }
+          });
+      } catch(e) {
+          showToast('讀取自動備份失敗 ❌');
+      }
+  };
+  // -----------------------------
 
   useEffect(() => {
       if (activeTab === 'gold') fetchGoldPrice();
@@ -943,7 +1047,6 @@ export default function App() {
     const cid = profile.coupleId;
 
     try {
-        // Use coupleId to isolate collections
         const transRef = collection(db, 'artifacts', appId, 'public', 'data', `transactions_${cid}`);
         const jarsRef = collection(db, 'artifacts', appId, 'public', 'data', `savings_jars_${cid}`);
         const booksRef = collection(db, 'artifacts', appId, 'public', 'data', `books_${cid}`);
@@ -1003,7 +1106,6 @@ export default function App() {
       showToast('配對碼已複製 📋');
   };
 
-  // --- Handlers using coupleId scope ---
   const handleSaveTransaction = async (data) => {
     if (!user || !profile) return;
     try {
@@ -1166,6 +1268,91 @@ export default function App() {
 
   const handleScanComplete = (scannedItem) => { setEditingTransaction({ amount: scannedItem.amount, note: scannedItem.note, category: scannedItem.category, date: scannedItem.date || new Date().toISOString().split('T')[0] }); setShowScanner(false); setShowAddTransaction(true); };
 
+  const handleExportBackup = async () => {
+      showToast('正在準備備份檔... ⏳');
+      try {
+          const cid = profile.coupleId;
+          const backup = { timestamp: new Date().toISOString(), version: 1, data: {} };
+          const collectionsToBackup = ['books', 'transactions', 'savings_jars', 'gold_transactions'];
+          
+          for (const col of collectionsToBackup) {
+              const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', `${col}_${cid}`));
+              backup.data[col] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          }
+          
+          const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `小金庫備份_${new Date().toISOString().split('T')[0]}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast('備份下載完成！📦');
+      } catch (error) {
+          console.error("Export error", error);
+          showToast('備份失敗 ❌');
+      }
+  };
+
+  const handleImportBackup = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+          try {
+              const backup = JSON.parse(e.target.result);
+              if (!backup.data || !backup.timestamp) throw new Error("格式錯誤");
+              
+              const backupDate = new Date(backup.timestamp).toLocaleString('zh-TW');
+              
+              setConfirmModal({
+                  isOpen: true,
+                  title: "⚠️ 警告：還原備份資料",
+                  message: `您即將還原備份檔（建立於：${backupDate}）。這將會覆蓋您與另一半目前的記帳資料，確定要還原嗎？`,
+                  isDanger: true,
+                  onConfirm: async () => {
+                      setConfirmModal({ isOpen: false });
+                      showToast('正在還原資料，請稍候... ⏳');
+                      try {
+                          const cid = profile.coupleId;
+                          let batch = writeBatch(db);
+                          let count = 0;
+                          
+                          const collectionsToBackup = ['books', 'transactions', 'savings_jars', 'gold_transactions'];
+                          for (const col of collectionsToBackup) {
+                              if (backup.data[col]) {
+                                  for (const item of backup.data[col]) {
+                                      const docData = { ...item };
+                                      delete docData.id; 
+                                      const ref = doc(db, 'artifacts', appId, 'public', 'data', `${col}_${cid}`, item.id);
+                                      batch.set(ref, docData);
+                                      count++;
+                                      if (count >= 400) { 
+                                          await batch.commit();
+                                          batch = writeBatch(db);
+                                          count = 0;
+                                      }
+                                  }
+                              }
+                          }
+                          if (count > 0) await batch.commit();
+                          showToast('資料還原成功！🎉');
+                          event.target.value = ''; 
+                      } catch (err) {
+                          console.error(err);
+                          showToast('還原過程發生錯誤 ❌');
+                      }
+                  }
+              });
+          } catch (error) {
+              console.error("Import error", error);
+              showToast('讀取失敗：檔案格式不正確 ❌');
+          }
+      };
+      reader.readAsText(file);
+  };
+
   if (loadingAuth) return <AppLoading />;
   
   if (!user || !profile) {
@@ -1231,7 +1418,7 @@ export default function App() {
             <GoldView transactions={goldTransactions} goldPrice={goldPrice} history={goldHistory} period={goldPeriod} setPeriod={setGoldPeriod} role={role} onAdd={() => { setEditingGold(null); setShowAddGold(true); }} onEdit={(t) => { setEditingGold(t); setShowAddGold(true); }} onDelete={handleDeleteGold} loading={goldLoading} error={goldError} onRefresh={fetchGoldPrice} intraday={goldIntraday} />
         )}
         {activeTab === 'settings' && (
-            <SettingsView role={role} coupleId={profile.coupleId} onCopyCode={copyCode} onLogout={() => { signOut(auth); }} />
+            <SettingsView role={role} coupleId={profile.coupleId} onCopyCode={copyCode} onLogout={() => { signOut(auth); }} onExport={handleExportBackup} onImport={handleImportBackup} autoBackupTime={autoBackupTime} onRestoreAutoBackup={handleRestoreAutoBackup} />
         )}
       </div>
 
