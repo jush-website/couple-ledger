@@ -12,22 +12,47 @@ const MAX_IMAGE_BYTES = 180 * 1024;
 // 而且要求繁體中文台灣用語，換模型不代表要重新調教輸出格式。
 const PROMPT = `
     Analyze this receipt image.
-    1. Identify the date (YYYY-MM-DD format).
-    2. List all items with their prices.
-    3. Translate item names to Traditional Chinese (Taiwan usage).
-    4. Categorize each item into one of these IDs: 'food', 'transport', 'entertainment', 'shopping', 'house', 'travel', 'other'.
-    5. Return ONLY valid JSON in this format:
+    1. Identify the transaction date (YYYY-MM-DD format).
+    2. List ONLY the actual purchased line items with their prices.
+       Include add-ons and surcharges that were genuinely charged
+       (e.g. 清潔費 cleaning fee, 服務費 service charge, 外送費 delivery fee).
+       Each item's full name as printed, do not truncate.
+    3. NEVER list summary or payment rows as items. Specifically EXCLUDE:
+       小計 subtotal, 合計/總計 total, 應付/應收 amount due, 實收,
+       現金付款/現金/刷卡/信用卡/悠遊卡 payment, 找零 change,
+       營業稅/稅額 tax lines, 折扣/折讓/優惠 discounts, 發票/統一編號.
+       These are NOT items. Listing them causes double counting.
+    4. Translate item names to Traditional Chinese (Taiwan usage).
+    5. Categorize each item into one of these IDs: 'food', 'transport', 'entertainment', 'shopping', 'house', 'travel', 'other'.
+       Sub-items belong to the same category as the dish they belong to.
+    6. Return ONLY valid JSON in this format:
     {
       "date": "YYYY-MM-DD",
       "items": [
         { "name": "Item Name in TW Chinese", "price": 100, "category": "food" }
-      ],
-      "total": 100
+      ]
     }
     If date is unclear, use today. If category is unclear, use 'other'.
 `;
 
 const CATEGORY_IDS = ['food', 'transport', 'entertainment', 'shopping', 'house', 'travel', 'other'];
+
+// 模型很愛把「小計 / 總計 / 現金付款 / 找零」當成品項列出來，全勾起來就會重複計算。
+// prompt 已經講了，但 prompt 會飄，這裡再擋一層。
+// 注意：清潔費／服務費／外送費「不」在此列 —— 那是真的付出去的錢，要留著。
+const SUMMARY_PATTERNS = [
+  /小\s*計/, /合\s*計/, /總\s*計/, /總\s*金\s*額/, /金額合計/,
+  /應\s*[付收]/, /實\s*[付收]/, /本次消費/,
+  /現\s*金/, /付\s*款/, /刷\s*卡/, /信用卡/, /悠遊卡|一卡通|電子支付|行動支付/,
+  /找\s*[零錢]/, /退\s*還/,
+  /營業稅|稅\s*額|含稅|未稅|外加稅/,
+  /折\s*[扣讓]|優\s*惠|折抵|扣抵/,
+  /發\s*票|統一編號|統編|載具/,
+  /^(sub)?total$/i, /^amount\s*(due|paid)$/i, /^cash$/i, /^change$/i,
+  /^tax$/i, /^discount$/i, /^payment$/i, /^balance$/i,
+];
+
+export const isSummaryRow = (name) => SUMMARY_PATTERNS.some((re) => re.test(name));
 
 // 模型偶爾會用 ```json 圍籬包起來，或在 JSON 前後多講幾句話
 export const extractJson = (text) => {
@@ -54,10 +79,14 @@ export const normalize = (raw) => {
       price: Number(item?.price) || 0,
       category: CATEGORY_IDS.includes(item?.category) ? item.category : 'other',
     }))
-    .filter((item) => item.price > 0);
+    .filter((item) => item.price > 0 && !isSummaryRow(item.name));
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(raw?.date) ? raw.date : today;
-  const total = Number(raw?.total) || cleanItems.reduce((sum, i) => sum + i.price, 0);
+
+  // total 一律由品項加總算出來，不採用模型回的 total。
+  // 模型常把「現金付款」當成總額（付 1002 找 210，實際消費是 792），
+  // 而且畫面上的總計必須跟列出來的品項對得起來，不然使用者會看不懂。
+  const total = cleanItems.reduce((sum, i) => sum + i.price, 0);
 
   return { date, items: cleanItems, total };
 };
