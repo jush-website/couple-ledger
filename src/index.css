@@ -1,0 +1,354 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   主題系統
+   ---------------------------------------------------------------------------
+   刻意「覆寫 Tailwind 內建色階」而不是發明一組新的 token 名稱：
+   App.jsx 裡有 600 多處 bg-gray-50 / text-blue-600 / bg-pink-100 這類 class，
+   把它們指向 CSS 變數，換主題就只是換變數，標記一行都不用動。
+
+   語意對應：
+     gray   → 介面中性色（背景、文字、邊框）
+     blue   → 男友 (bf)
+     pink   → 女友 (gf)
+     purple → AI / 掃描
+     surface→ 卡片底色（原本寫死的 bg-white）
+
+   用 `@theme inline`，utility 直接展開成 var(--c-*)，
+   所以 <html data-theme> 一改，整頁即時跟著變。
+--------------------------------------------------------------------------- */
+
+@theme inline {
+  --color-surface: var(--c-surface);
+
+  --color-gray-50: var(--c-gray-50);
+  --color-gray-100: var(--c-gray-100);
+  --color-gray-200: var(--c-gray-200);
+  --color-gray-300: var(--c-gray-300);
+  --color-gray-400: var(--c-gray-400);
+  --color-gray-500: var(--c-gray-500);
+  --color-gray-600: var(--c-gray-600);
+  --color-gray-700: var(--c-gray-700);
+  --color-gray-800: var(--c-gray-800);
+  --color-gray-900: var(--c-gray-900);
+
+  --color-blue-50: var(--c-blue-50);
+  --color-blue-100: var(--c-blue-100);
+  --color-blue-200: var(--c-blue-200);
+  --color-blue-300: var(--c-blue-300);
+  --color-blue-400: var(--c-blue-400);
+  --color-blue-500: var(--c-blue-500);
+  --color-blue-600: var(--c-blue-600);
+  --color-blue-700: var(--c-blue-700);
+  --color-indigo-600: var(--c-blue-700);
+
+  --color-pink-50: var(--c-pink-50);
+  --color-pink-100: var(--c-pink-100);
+  --color-pink-200: var(--c-pink-200);
+  --color-pink-300: var(--c-pink-300);
+  --color-pink-400: var(--c-pink-400);
+  --color-pink-500: var(--c-pink-500);
+  --color-pink-600: var(--c-pink-600);
+  --color-pink-700: var(--c-pink-700);
+  --color-rose-500: var(--c-pink-500);
+  --color-rose-600: var(--c-pink-600);
+
+  --color-purple-50: var(--c-purple-50);
+  --color-purple-100: var(--c-purple-100);
+  --color-purple-200: var(--c-purple-200);
+  --color-purple-300: var(--c-purple-300);
+  --color-purple-400: var(--c-purple-400);
+  --color-purple-500: var(--c-purple-500);
+  --color-purple-600: var(--c-purple-600);
+
+  /* 狀態色只有淺色底需要跟著主題走（深色主題下白底色票會刺眼），
+     500 以上的實色留原生值即可 */
+  --color-red-50: var(--c-red-50);
+  --color-red-100: var(--c-red-100);
+  --color-green-100: var(--c-green-100);
+  --color-green-200: var(--c-green-200);
+  --color-green-300: var(--c-green-300);
+  --color-yellow-50: var(--c-yellow-50);
+  --color-yellow-100: var(--c-yellow-100);
+  --color-yellow-200: var(--c-yellow-200);
+  --color-orange-50: var(--c-orange-50);
+  --color-orange-100: var(--c-orange-100);
+  --color-orange-200: var(--c-orange-200);
+
+  --animate-spin-slow: spin 3s linear infinite;
+}
+
+/* --- 經典藍粉（預設，等同改版前的外觀） --- */
+:root,
+[data-theme="classic"] {
+  --c-surface: #ffffff;
+  --c-gray-50: #f9fafb;
+  --c-gray-100: #f3f4f6;
+  --c-gray-200: #e5e7eb;
+  --c-gray-300: #d1d5db;
+  --c-gray-400: #9ca3af;
+  --c-gray-500: #6b7280;
+  --c-gray-600: #4b5563;
+  --c-gray-700: #374151;
+  --c-gray-800: #1f2937;
+  --c-gray-900: #111827;
+
+  --c-blue-50: #eff6ff;
+  --c-blue-100: #dbeafe;
+  --c-blue-200: #bfdbfe;
+  --c-blue-300: #93c5fd;
+  --c-blue-400: #60a5fa;
+  --c-blue-500: #3b82f6;
+  --c-blue-600: #2563eb;
+  --c-blue-700: #1d4ed8;
+
+  --c-pink-50: #fdf2f8;
+  --c-pink-100: #fce7f3;
+  --c-pink-200: #fbcfe8;
+  --c-pink-300: #f9a8d4;
+  --c-pink-400: #f472b6;
+  --c-pink-500: #ec4899;
+  --c-pink-600: #db2777;
+  --c-pink-700: #be185d;
+
+  --c-purple-50: #faf5ff;
+  --c-purple-100: #f3e8ff;
+  --c-purple-200: #e9d5ff;
+  --c-purple-300: #d8b4fe;
+  --c-purple-400: #c084fc;
+  --c-purple-500: #a855f7;
+  --c-purple-600: #9333ea;
+
+  --c-red-50: #fef2f2;
+  --c-red-100: #fee2e2;
+  --c-green-100: #dcfce7;
+  --c-green-200: #bbf7d0;
+  --c-green-300: #86efac;
+  --c-yellow-50: #fefce8;
+  --c-yellow-100: #fef9c3;
+  --c-yellow-200: #fef08a;
+  --c-orange-50: #fff7ed;
+  --c-orange-100: #ffedd5;
+  --c-orange-200: #fed7aa;
+}
+
+/* --- 暖奶油：米白底 + 焦糖／橄欖 --- */
+[data-theme="cream"] {
+  --c-surface: #fffdf8;
+  --c-gray-50: #faf5ec;
+  --c-gray-100: #f3ebdd;
+  --c-gray-200: #e7dcc8;
+  --c-gray-300: #d3c4a9;
+  --c-gray-400: #a89881;
+  --c-gray-500: #857762;
+  --c-gray-600: #6b5e4c;
+  --c-gray-700: #52483a;
+  --c-gray-800: #3a3229;
+  --c-gray-900: #24201a;
+
+  --c-blue-50: #f2f6f3;
+  --c-blue-100: #dfeae1;
+  --c-blue-200: #c4d8c8;
+  --c-blue-300: #9dbda4;
+  --c-blue-400: #74a07e;
+  --c-blue-500: #558463;
+  --c-blue-600: #3f6a4c;
+  --c-blue-700: #2f5039;
+
+  --c-pink-50: #fdf4ef;
+  --c-pink-100: #fbe6da;
+  --c-pink-200: #f6ccb4;
+  --c-pink-300: #eda887;
+  --c-pink-400: #e08862;
+  --c-pink-500: #d06c46;
+  --c-pink-600: #b25534;
+  --c-pink-700: #8d4128;
+
+  --c-purple-50: #f7f3ee;
+  --c-purple-100: #ece2d5;
+  --c-purple-200: #dcc9b2;
+  --c-purple-300: #c6a984;
+  --c-purple-400: #ae8c63;
+  --c-purple-500: #96724b;
+  --c-purple-600: #7b5c3b;
+
+  --c-red-50: #fdf1ee;
+  --c-red-100: #fadfd9;
+  --c-green-100: #e2eddd;
+  --c-green-200: #cadfc2;
+  --c-green-300: #a9c99e;
+  --c-yellow-50: #fdf8e8;
+  --c-yellow-100: #f8eec9;
+  --c-yellow-200: #f0dfa2;
+  --c-orange-50: #fdf4e9;
+  --c-orange-100: #f8e6cc;
+  --c-orange-200: #f0d2a4;
+}
+
+/* --- 莫蘭迪：低飽和灰調 --- */
+[data-theme="morandi"] {
+  --c-surface: #fbfbfa;
+  --c-gray-50: #f2f2f0;
+  --c-gray-100: #e8e8e5;
+  --c-gray-200: #d9d9d5;
+  --c-gray-300: #c2c2bd;
+  --c-gray-400: #97978f;
+  --c-gray-500: #77776f;
+  --c-gray-600: #5f5f58;
+  --c-gray-700: #4a4a44;
+  --c-gray-800: #34342f;
+  --c-gray-900: #1f1f1c;
+
+  --c-blue-50: #eff2f4;
+  --c-blue-100: #dde4e9;
+  --c-blue-200: #c2cfd8;
+  --c-blue-300: #9db1c0;
+  --c-blue-400: #7c94a7;
+  --c-blue-500: #62798d;
+  --c-blue-600: #4e6274;
+  --c-blue-700: #3b4b5a;
+
+  --c-pink-50: #f6f0f0;
+  --c-pink-100: #ece0e0;
+  --c-pink-200: #dcc7c7;
+  --c-pink-300: #c5a5a5;
+  --c-pink-400: #ae8888;
+  --c-pink-500: #9a7070;
+  --c-pink-600: #815a5a;
+  --c-pink-700: #674646;
+
+  --c-purple-50: #f2f0f4;
+  --c-purple-100: #e5e1ea;
+  --c-purple-200: #d0c9d9;
+  --c-purple-300: #b1a6c0;
+  --c-purple-400: #9587a6;
+  --c-purple-500: #7d6e8f;
+  --c-purple-600: #665a75;
+
+  --c-red-50: #f7eeed;
+  --c-red-100: #eeddda;
+  --c-green-100: #dde5dc;
+  --c-green-200: #c6d4c4;
+  --c-green-300: #a5b9a2;
+  --c-yellow-50: #f7f3e6;
+  --c-yellow-100: #ece5cd;
+  --c-yellow-200: #ddd2ab;
+  --c-orange-50: #f7f0e8;
+  --c-orange-100: #ece0d0;
+  --c-orange-200: #dcc9af;
+}
+
+/* --- 暗夜：灰階整體反轉，深底淺字 --- */
+[data-theme="night"] {
+  --c-surface: #1b1f27;
+  --c-gray-50: #171b22;
+  --c-gray-100: #232833;
+  --c-gray-200: #2f3542;
+  --c-gray-300: #3d4453;
+  --c-gray-400: #8b93a3;
+  --c-gray-500: #a2aaba;
+  --c-gray-600: #c2c8d4;
+  --c-gray-700: #dde1e8;
+  --c-gray-800: #eef1f5;
+  --c-gray-900: #f7f9fb;
+
+  --c-blue-50: #16233a;
+  --c-blue-100: #1c3050;
+  --c-blue-200: #26436e;
+  --c-blue-300: #3a5f95;
+  --c-blue-400: #5382c4;
+  --c-blue-500: #5f9bee;
+  --c-blue-600: #74acf7;
+  --c-blue-700: #9cc4fa;
+
+  --c-pink-50: #34162a;
+  --c-pink-100: #451d37;
+  --c-pink-200: #61294c;
+  --c-pink-300: #863a68;
+  --c-pink-400: #b64f8b;
+  --c-pink-500: #e46aae;
+  --c-pink-600: #f087c1;
+  --c-pink-700: #f7abd4;
+
+  --c-purple-50: #241a3a;
+  --c-purple-100: #2f2250;
+  --c-purple-200: #422f6e;
+  --c-purple-300: #5b4195;
+  --c-purple-400: #7c5cc4;
+  --c-purple-500: #9a7aee;
+  --c-purple-600: #ae94f7;
+
+  --c-red-50: #3a1c1c;
+  --c-red-100: #4d2525;
+  --c-green-100: #14361f;
+  --c-green-200: #1c4a2b;
+  --c-green-300: #2a6b3e;
+  --c-yellow-50: #362c12;
+  --c-yellow-100: #4a3c18;
+  --c-yellow-200: #6b5722;
+  --c-orange-50: #3a2413;
+  --c-orange-100: #4d301a;
+  --c-orange-200: #6b4324;
+}
+
+/* ---------------------------------------------------------------------------
+   Tailwind v4 相容補丁
+   v4 把預設 border-color 從 gray-200 改成 currentColor、button 的 cursor
+   從 pointer 改成 default。App.jsx 是照 v3 慣例寫的，這裡補回來。
+--------------------------------------------------------------------------- */
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--color-gray-200);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  html {
+    background-color: var(--color-gray-50);
+    color-scheme: light;
+  }
+
+  html[data-theme="night"] {
+    color-scheme: dark;
+  }
+}
+
+/* --- 原本掛在 class 上但從來沒被定義過的動畫 --- */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
