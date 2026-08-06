@@ -27,17 +27,20 @@ npm run dev
 
 ```
 api/
-  gold.js        台銀／Yahoo 金價爬取
-  receipt.js     收據辨識 proxy → NVIDIA NIM
-  receipt.test.mjs   node api/receipt.test.mjs
+  gold.js          台銀／Yahoo 金價爬取
+  _nim.js          NVIDIA NIM 共用呼叫層（底線開頭 = 不是 route）
+  receipt.js       收據辨識 → 品項清單
+  parse-entry.js   語音文字 → 記帳欄位
+  *.test.mjs       node api/receipt.test.mjs / node api/parse-entry.test.mjs
 src/
   lib/
     firebase.js  Firebase init + Firestore 路徑 helper
     format.js    金額／重量格式化、計算機求值、圖片壓縮
     receipt.js   呼叫 /api/receipt
+    speech.js    瀏覽器聽寫能力偵測
     theme.js     主題清單與 useTheme
     constants.js CATEGORIES、備份集合清單
-  components/    22 個元件
+  components/    23 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -58,6 +61,26 @@ src/
 `ReceiptScannerModal` → `compressForOcr`（壓到 170KB 以下）→ `POST /api/receipt`
 → NVIDIA `nvidia/nemotron-nano-12b-v2-vl` → 正規化成
 `{ date, items: [{name, price, category}], total }` → 帶入記帳表單。
+
+## 語音記帳
+
+`VoiceEntryModal` 用瀏覽器內建的 Web Speech API 聽寫（`zh-TW`，零依賴零成本），
+文字送 `POST /api/parse-entry` 解析成 `{amount, note, category, date, paidBy, splitType}`，
+再帶進記帳表單確認。Firefox 沒有這個 API，偵測不到時麥克風按鈕整個不顯示。
+
+可以這樣說：「昨天晚餐六百八 我付的 平分」「計程車兩百五 他付的」「買衣服一千二 我自己的」。
+`我` 會依說話者的 role 解析，所以 API 需要前端把 `role` 與 `today` 一起帶上
+（伺服器在 UTC，深夜記帳會算成隔天）。
+
+聽不出金額時回 422，不會憑空生出一筆帳 —— prompt 明確要求
+「沒有金額就回 `{"amount": null}`」，否則模型會照抄範例值。
+
+## 兩個 AI 功能的共同原則
+
+辨識結果一律只是「預先填好」，**永遠經過確認畫面才寫進 Firestore**。
+兩者都走 `handlePrefillTransaction`，它塞給 `editingTransaction` 的物件沒有 `id`，
+而 `handleSaveTransaction` 是靠 `editingTransaction?.id` 判斷新增或編輯 ——
+不要改成只看真假值，那會走進 `updateDoc(…, undefined)` 然後被 catch 吞掉。
 
 ## ⚠️ 不要動的地方
 

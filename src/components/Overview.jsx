@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
-import { Plus, Trash2, RefreshCw, CheckCircle, Camera } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, CheckCircle, Camera, Mic } from 'lucide-react';
 import { formatMoney, calculateExpense } from '../lib/format.js';
 import { CATEGORIES } from '../lib/constants.js';
+import { isVoiceSupported } from '../lib/speech.js';
 
-const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay, readOnly }) => {
+const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onVoice, onRepay, readOnly }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
     transactions.forEach(t => {
@@ -32,7 +33,7 @@ const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onRepay
         {Math.abs(debt) > 0 && !readOnly && (<button onClick={() => onRepay(debt)} className="mt-4 px-6 py-2 bg-gray-900 text-surface text-sm font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 mx-auto"><RefreshCw size={16} /> 登記還款</button>)}
       </div>
       <div className="space-y-4">
-        <div className="flex justify-between items-end px-2"><h3 className="font-bold text-lg text-gray-800">最近紀錄</h3>{!readOnly && (<div className="flex gap-2"><button onClick={onScan} className="bg-purple-100 text-purple-600 p-3 rounded-xl shadow-xs active:scale-90 transition-transform"><Camera size={20} /></button><button onClick={onAdd} className="bg-gray-900 text-surface p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform"><Plus size={20} /></button></div>)}</div>
+        <div className="flex justify-between items-end px-2"><h3 className="font-bold text-lg text-gray-800">最近紀錄</h3>{!readOnly && (<div className="flex gap-2">{isVoiceSupported() && (<button onClick={onVoice} aria-label="語音記帳" className="bg-purple-100 text-purple-600 p-3 rounded-xl shadow-xs active:scale-90 transition-transform"><Mic size={20} /></button>)}<button onClick={onScan} aria-label="掃描收據" className="bg-purple-100 text-purple-600 p-3 rounded-xl shadow-xs active:scale-90 transition-transform"><Camera size={20} /></button><button onClick={onAdd} className="bg-gray-900 text-surface p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform"><Plus size={20} /></button></div>)}</div>
         {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, items]) => {
             const daily = items.reduce((acc, t) => { const { bf, gf } = calculateExpense(t); return { bf: acc.bf + bf, gf: acc.gf + gf }; }, { bf: 0, gf: 0 });
             return (

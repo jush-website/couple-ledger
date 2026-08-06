@@ -1,7 +1,8 @@
 // node api/receipt.test.mjs
 // 只測「模型輸出 → 前端吃得下的形狀」這段，不打真的 API。
 import assert from 'node:assert/strict';
-import { extractJson, normalize, isSummaryRow } from './receipt.js';
+import { normalize, isSummaryRow } from './receipt.js';
+import { extractJson } from './_nim.js';
 
 const today = new Date().toISOString().split('T')[0];
 

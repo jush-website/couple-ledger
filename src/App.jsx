@@ -29,6 +29,7 @@ import AddJarModal from './components/AddJarModal.jsx';
 import DepositModal from './components/DepositModal.jsx';
 import JarHistoryModal from './components/JarHistoryModal.jsx';
 import ReceiptScannerModal from './components/ReceiptScannerModal.jsx';
+import VoiceEntryModal from './components/VoiceEntryModal.jsx';
 import AddGoldModal from './components/AddGoldModal.jsx';
 import RouletteModal from './components/RouletteModal.jsx';
 import RepaymentModal from './components/RepaymentModal.jsx';
@@ -63,6 +64,7 @@ export default function App() {
   const [showBookManager, setShowBookManager] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
+  const [showVoice, setShowVoice] = useState(false);
     
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
@@ -331,15 +333,18 @@ export default function App() {
     try {
       const finalAmount = Number(safeCalculate(data.amount));
       const cleanData = { ...data, amount: finalAmount, bookId: activeBookId };
-      if (editingTransaction) {
+      // 要判斷的是「有沒有既有的那筆文件」，不是 editingTransaction 有沒有值。
+      // 收據掃描與語音記帳會把「預先填好的資料」放進 editingTransaction，那種物件沒有 id，
+      // 只看真假值會走進 updateDoc(…, undefined)，doc() 直接丟 TypeError 然後被 catch 吞掉。
+      if (editingTransaction?.id) {
         await updateDoc(coupleDoc('transactions', profile.coupleId, editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
         showToast('紀錄已更新 ✨');
       } else {
         await addDoc(coupleCol('transactions', profile.coupleId), { ...cleanData, createdAt: serverTimestamp() });
         showToast('紀錄已新增 🎉');
       }
-      setShowAddTransaction(false); setEditingTransaction(null); setRepaymentDebt(null); 
-    } catch (e) { console.error(e); }
+      setShowAddTransaction(false); setEditingTransaction(null); setRepaymentDebt(null);
+    } catch (e) { console.error(e); showToast('存檔失敗，請再試一次 ❌'); }
   };
 
   const handleSaveGold = async (data) => {
@@ -499,7 +504,21 @@ export default function App() {
       });
   };
 
-  const handleScanComplete = (scannedItem) => { setEditingTransaction({ amount: scannedItem.amount, note: scannedItem.note, category: scannedItem.category, date: scannedItem.date || new Date().toISOString().split('T')[0] }); setShowScanner(false); setShowAddTransaction(true); };
+  // 收據掃描與語音記帳都走這裡：解析結果只是「預先填好」，一定要經過確認畫面才會存檔。
+  // 注意這個物件沒有 id —— handleSaveTransaction 是靠 editingTransaction?.id 判斷新增或編輯的。
+  const handlePrefillTransaction = (parsed) => {
+    setEditingTransaction({
+      amount: parsed.amount,
+      note: parsed.note,
+      category: parsed.category,
+      date: parsed.date || new Date().toLocaleDateString('en-CA'),
+      ...(parsed.paidBy ? { paidBy: parsed.paidBy } : {}),
+      ...(parsed.splitType ? { splitType: parsed.splitType } : {}),
+    });
+    setShowScanner(false);
+    setShowVoice(false);
+    setShowAddTransaction(true);
+  };
 
   const handleExportBackup = async () => {
       showToast('正在準備備份檔... ⏳');
@@ -614,7 +633,7 @@ export default function App() {
         )}
         
         {activeTab === 'overview' && (
-            <Overview transactions={filteredTransactions} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => setRepaymentDebt(debt)} />
+            <Overview transactions={filteredTransactions} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => setRepaymentDebt(debt)} />
         )}
 
         {activeTab === 'stats' && (
@@ -656,7 +675,8 @@ export default function App() {
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} role={role} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
-      {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handleScanComplete} />}
+      {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handlePrefillTransaction} />}
+      {showVoice && <VoiceEntryModal role={role} onClose={() => setShowVoice(false)} onConfirm={handlePrefillTransaction} />}
       {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} currentPrice={goldPrice} initialData={editingGold} role={role} />}
       {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
       {repaymentDebt !== null && <RepaymentModal debt={repaymentDebt} onClose={() => setRepaymentDebt(null)} onSave={handleSaveTransaction} />}
