@@ -4,7 +4,7 @@ import { formatMoney, calculateExpense } from '../lib/format.js';
 import { CATEGORIES } from '../lib/constants.js';
 import { isVoiceSupported } from '../lib/speech.js';
 
-const Overview = ({ transactions, role, onAdd, onEdit, onDelete, onScan, onVoice, onRepay, readOnly }) => {
+const Overview = ({ transactions, onAdd, onEdit, onDelete, onScan, onVoice, onRepay, readOnly }) => {
   const debt = useMemo(() => {
     let bfLent = 0;
     transactions.forEach(t => {

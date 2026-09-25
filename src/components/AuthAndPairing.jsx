@@ -1,18 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Heart, Plus, CheckCircle, ArrowLeft, Loader2, Users } from 'lucide-react';
 import { setDoc, serverTimestamp } from 'firebase/firestore';
 import { profileDoc } from '../lib/firebase.js';
 
 const AuthAndPairing = ({ user, onGoogleLogin, onComplete }) => {
-    const [step, setStep] = useState(user ? 'mode' : 'login');
+    const [stepState, setStep] = useState(user ? 'mode' : 'login');
     const [mode, setMode] = useState(null); 
     const [joinCode, setJoinCode] = useState('');
     const [role, setRole] = useState(null); 
     const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        if (user && step === 'login') setStep('mode');
-    }, [user, step]);
+    // 登入完成（user 出現）就直接進下一步，用推導的就好，不需要 effect 再 setState 一次
+    const step = user && stepState === 'login' ? 'mode' : stepState;
 
     const handleSaveProfile = async () => {
         if (!role || (mode === 'join' && !joinCode)) return;

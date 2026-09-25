@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { PiggyBank, Plus, Trash2, User, Target, Pencil, CheckCircle, History, Dices, Users, Trophy } from 'lucide-react';
 import { formatMoney } from '../lib/format.js';
 
-const Savings = ({ jars, role, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette, onComplete }) => {
+const Savings = ({ jars, onAdd, onEdit, onDeposit, onDelete, onHistory, onOpenRoulette, onComplete }) => {
   const [viewCompleted, setViewCompleted] = useState(false);
   const [viewType, setViewType] = useState('shared'); 
   const filterJars = (status) => jars.filter(j => { const jStatus = j.status || 'active'; const isStatusMatch = status === 'completed' ? jStatus === 'completed' : jStatus !== 'completed'; const jOwner = j.owner || 'shared'; let isOwnerMatch = false; if (viewType === 'shared') { isOwnerMatch = jOwner === 'shared'; } else { isOwnerMatch = jOwner !== 'shared'; } return isStatusMatch && isOwnerMatch; }).sort((a, b) => { if (status === 'completed') { return (b.completedAt?.seconds || 0) - (a.completedAt?.seconds || 0); } return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0); });

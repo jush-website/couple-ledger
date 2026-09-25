@@ -45,6 +45,14 @@ src/
   App.jsx        狀態與資料流
 ```
 
+## 載入效能
+
+- 首屏只載入登入頁、總覽與「記一筆」；其他分頁與對話框用 `React.lazy` 延後載入，
+  登入後在瀏覽器閒置時預先抓好（`src/App.jsx` 的 `lazyImports`）。新增分頁或對話框時照同樣方式加進去。
+- firebase / react / lucide-react 拆成獨立 chunk（`vite.config.js`），改 App 程式碼不會讓這些大檔的快取失效；
+  `/assets/*` 在 `vercel.json` 設了一年 immutable 快取（檔名有 hash，內容變了檔名就會變）。
+- `/api/gold` 同時向台銀與 Yahoo 發請求，回應由 Vercel CDN 快取 5 分鐘；前端切回黃金頁時 5 分鐘內也不重抓。
+
 ## 換主題
 
 設定頁可切換 `經典藍粉` / `暖奶油` / `莫蘭迪` / `暗夜`，選擇存在 localStorage，

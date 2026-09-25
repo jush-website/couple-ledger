@@ -9,3 +9,6 @@ dist-ssr
 .deep-research
 *.log
 .DS_Store
+
+# claude-flow 的執行狀態（pid、metrics），每次都會變，不該進版控
+.claude-flow/
