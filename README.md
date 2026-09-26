@@ -32,7 +32,7 @@ api/
   _nim.js          NVIDIA NIM 共用呼叫層（底線開頭 = 不是 route）
   receipt.js       收據辨識 → 品項清單
   parse-entry.js   語音文字 → 記帳欄位
-  *.test.mjs       node api/receipt.test.mjs / node api/parse-entry.test.mjs
+  *.test.mjs       node api/_nim.test.mjs / receipt.test.mjs / parse-entry.test.mjs
 src/
   lib/
     firebase.js  Firebase init + Firestore 路徑 helper
@@ -89,6 +89,11 @@ src/
 兩者共用 `api/_nim.js` 的同一個模型。**NIM 的模型會退役**：原本的
 `nvidia/nemotron-nano-12b-v2-vl` 在 2026-08-26 下架，兩個功能同時壞掉、畫面顯示「辨識服務回應 410」。
 下次再看到 404／410，到 build.nvidia.com 挑一個能看圖的模型，在 Vercel 設 `NVIDIA_MODEL` 後重新部署即可。
+
+免費端點名額很少，熱門模型常回 503「Worker local total request limit reached」。`callNim` 會：
+忙線（429／5xx／逾時）同一模型等 1 秒重試一次 → 還是不行就換備用模型（`FALLBACK_MODELS`，
+Llama 3.2 Vision）；下架或參數不合（400／404／410）直接換下一個；金鑰錯誤（401／403）立刻停。
+全部重試加起來最多 55 秒。邏輯的測試在 `node api/_nim.test.mjs`。
 
 辨識結果一律只是「預先填好」，**永遠經過確認畫面才寫進 Firestore**。
 兩者都走 `handlePrefillTransaction`，它塞給 `editingTransaction` 的物件沒有 `id`，
