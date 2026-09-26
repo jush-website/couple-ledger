@@ -49,7 +49,7 @@ const run = async (responses) => {
 {
   const { text, calls } = await run([fail(503), fail(503), ok('C')]);
   assert.equal(text, 'C');
-  assert.equal(calls[2].model, 'meta/llama-3.2-90b-vision-instruct');
+  assert.equal(calls[2].model, 'meta/llama-3.2-11b-vision-instruct');
   assert.equal(calls[2].chat_template_kwargs, undefined);
 }
 
@@ -58,7 +58,7 @@ const run = async (responses) => {
   const { text, calls } = await run([fail(410), ok('D')]);
   assert.equal(text, 'D');
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].model, 'meta/llama-3.2-90b-vision-instruct');
+  assert.equal(calls[1].model, 'meta/llama-3.2-11b-vision-instruct');
 }
 
 // 連線失敗／逾時當成忙線

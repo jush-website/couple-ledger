@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import {
-  addDoc, onSnapshot, deleteDoc, updateDoc, serverTimestamp,
+  addDoc, setDoc, doc, onSnapshot, deleteDoc, updateDoc, serverTimestamp,
   writeBatch, query, where, getDocs, runTransaction
 } from 'firebase/firestore';
 import {
@@ -13,6 +13,7 @@ import {
 
 import { auth, db, googleProvider, coupleCol, coupleDoc, profileDoc } from './lib/firebase.js';
 import { safeCalculate } from './lib/format.js';
+import { getQuickPicks } from './lib/quickPicks.js';
 import { BACKUP_COLLECTIONS } from './lib/constants.js';
 import { useTheme } from './lib/theme.js';
 
@@ -322,10 +323,13 @@ export default function App() {
         const unsubBooks = onSnapshot(booksRef, async (s) => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
             data.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-            if (data.length === 0 && !s.metadata.hasPendingWrites) {
+            // 開了離線快取之後，第一次快照可能是「本機快取還沒有資料」的空結果（fromCache），
+            // 那不代表雲端真的沒有帳本；只有伺服器確認是空的才自動建第一本，否則會多出重複的帳本。
+            if (data.length === 0 && !s.metadata.hasPendingWrites && !s.metadata.fromCache) {
                await addDoc(booksRef, { name: "我們的第一本帳", status: 'active', createdAt: serverTimestamp() });
                return; 
             }
+            if (data.length === 0) return;
             setBooks(data);
             setActiveBookId(prev => {
                 if (prev && data.find(b => b.id === prev)) return prev;
@@ -364,6 +368,9 @@ export default function App() {
       return transactions.filter(t => t.bookId ? t.bookId === activeBookId : activeBookId === defaultBookId);
   }, [transactions, activeBookId, books]);
 
+  // 常用項目看所有帳本的紀錄，資料比較多、比較準
+  const quickPicks = useMemo(() => getQuickPicks(transactions), [transactions]);
+
   const displayBooks = useMemo(() => books.filter(b => (b.status || 'active') === (viewArchived ? 'archived' : 'active')), [books, viewArchived]);
 
   // 連續跳兩個 toast 時，第一個的計時器不能把第二個提早關掉
@@ -379,6 +386,15 @@ export default function App() {
   const isReady = !!(user && profile);
   useEffect(() => { if (isReady) prefetchLazyChunks(); }, [isReady]);
 
+  // 加到主畫面後，手機狀態列跟標題列同色（男友藍／女友粉，跟著主題變）
+  const profileRole = profile?.role;
+  useEffect(() => {
+      if (!profileRole) return;
+      const color = getComputedStyle(document.documentElement)
+          .getPropertyValue(profileRole === 'bf' ? '--c-blue-600' : '--c-pink-500').trim();
+      if (color) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+  }, [profileRole, theme]);
+
   const copyCode = async () => {
       try {
           await navigator.clipboard.writeText(profile.coupleId);
@@ -391,7 +407,15 @@ export default function App() {
       showToast('配對碼已複製 📋');
   };
 
-  const handleSaveTransaction = async (data) => {
+  // 開了離線快取後，addDoc / updateDoc 的 promise 要等「伺服器確認」才 resolve；
+  // 沒訊號時會一直等下去，但資料其實已經寫進本機、畫面也已經更新了。
+  // 記帳這種操作不該卡在那裡轉圈圈，所以不等伺服器，失敗時再用 toast 通知。
+  const commitInBackground = (promise, failMsg) => {
+      promise.catch((e) => { console.error(e); showToast(failMsg); });
+  };
+  const savedToast = (msg) => showToast(navigator.onLine ? msg : '已先存在這台裝置，連上網路後會自動同步 📶');
+
+  const handleSaveTransaction = (data) => {
     if (!user || !profile) return;
     try {
       const finalAmount = Number(safeCalculate(data.amount));
@@ -400,13 +424,27 @@ export default function App() {
       // 收據掃描與語音記帳會把「預先填好的資料」放進 editingTransaction，那種物件沒有 id，
       // 只看真假值會走進 updateDoc(…, undefined)，doc() 直接丟 TypeError 然後被 catch 吞掉。
       if (editingTransaction?.id) {
-        await updateDoc(coupleDoc('transactions', profile.coupleId, editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() });
-        showToast('紀錄已更新 ✨');
+        commitInBackground(updateDoc(coupleDoc('transactions', profile.coupleId, editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() }), '更新沒有存到雲端，請再試一次 ❌');
+        savedToast('紀錄已更新 ✨');
       } else {
-        await addDoc(coupleCol('transactions', profile.coupleId), { ...cleanData, createdAt: serverTimestamp() });
-        showToast('紀錄已新增 🎉');
+        commitInBackground(addDoc(coupleCol('transactions', profile.coupleId), { ...cleanData, createdAt: serverTimestamp() }), '紀錄沒有存到雲端，請再試一次 ❌');
+        savedToast('紀錄已新增 🎉');
       }
       setShowAddTransaction(false); setEditingTransaction(null); setRepaymentDebt(null);
+    } catch (e) { console.error(e); showToast('存檔失敗，請再試一次 ❌'); }
+  };
+
+  // 收據「每項各記一筆」：一次寫入多筆，用 batch 確保要嘛全部成功、要嘛全部沒寫
+  const handleSaveMany = (entries) => {
+    if (!user || !profile || entries.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      for (const entry of entries) {
+        batch.set(doc(coupleCol('transactions', profile.coupleId)), { ...entry, amount: Number(entry.amount) || 0, bookId: activeBookId, createdAt: serverTimestamp() });
+      }
+      commitInBackground(batch.commit(), '紀錄沒有存到雲端，請再試一次 ❌');
+      savedToast(`已記下 ${entries.length} 筆 🎉`);
+      setShowScanner(false);
     } catch (e) { console.error(e); showToast('存檔失敗，請再試一次 ❌'); }
   };
 
@@ -535,15 +573,19 @@ export default function App() {
     });
   };
 
-  const handleSaveBook = async (name, status = 'active') => {
+  // budget 是 normalizeBudget 過的 { total, categories }；帳本文件只多一個選填欄位
+  const handleSaveBook = async (name, status = 'active', budget) => {
       if(!user || !profile || !name.trim()) return;
+      const budgetField = budget ? { budget } : {};
       try {
           if(editingBook) {
-              await updateDoc(coupleDoc('books', profile.coupleId, editingBook.id), { name, status, updatedAt: serverTimestamp() });
-              showToast('帳本已更新 ✨');
+              commitInBackground(updateDoc(coupleDoc('books', profile.coupleId, editingBook.id), { name, status, ...budgetField, updatedAt: serverTimestamp() }), '帳本沒有存到雲端，請再試一次 ❌');
+              savedToast('帳本已更新 ✨');
           } else {
-              const docRef = await addDoc(coupleCol('books', profile.coupleId), { name, status, createdAt: serverTimestamp() });
-              setActiveBookId(docRef.id); showToast('新帳本已建立 📘');
+              // 先在本機產生文件 id，離線時也能馬上切換到新帳本，不用等伺服器回應
+              const docRef = doc(coupleCol('books', profile.coupleId));
+              commitInBackground(setDoc(docRef, { name, status, ...budgetField, createdAt: serverTimestamp() }), '帳本沒有存到雲端，請再試一次 ❌');
+              setActiveBookId(docRef.id); savedToast('新帳本已建立 📘');
           }
           setShowBookManager(false); setEditingBook(null);
       } catch(e) { console.error(e); }
@@ -658,6 +700,7 @@ export default function App() {
   }
 
   const role = profile.role;
+  const activeBook = books.find(b => b.id === activeBookId);
   // 罐子在別的裝置被刪掉時 find 會拿到 undefined，這時就不要再開著紀錄視窗
   const showJarHistoryJar = showJarHistory ? jars.find(j => j.id === showJarHistory) : null;
 
@@ -698,12 +741,12 @@ export default function App() {
         )}
         
         {activeTab === 'overview' && (
-            <Overview transactions={filteredTransactions} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => setRepaymentDebt(debt)} />
+            <Overview transactions={filteredTransactions} budget={activeBook?.budget} onEditBudget={() => { setEditingBook(activeBook); setShowBookManager(true); }} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => setRepaymentDebt(debt)} />
         )}
 
         <Suspense fallback={<TabFallback />}>
         {activeTab === 'stats' && (
-            <div><div className="bg-surface px-4 py-2 rounded-xl shadow-xs mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600"><Book size={14}/> 統計範圍: {books.find(b => b.id === activeBookId)?.name || '未知帳本'}</div><Statistics transactions={filteredTransactions} /></div>
+            <div><div className="bg-surface px-4 py-2 rounded-xl shadow-xs mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600"><Book size={14}/> 統計範圍: {activeBook?.name || '未知帳本'}</div><Statistics transactions={filteredTransactions} budget={activeBook?.budget} /></div>
         )}
         {activeTab === 'savings' && (
             <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j.id)} onOpenRoulette={() => setShowRoulette(true)} onComplete={handleCompleteJar} />
@@ -738,12 +781,12 @@ export default function App() {
         </div>
       )}
 
-      {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
+      {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} quickPicks={quickPicks} />}
       <Suspense fallback={null}>
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} role={role} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
       {showJarHistoryJar && <JarHistoryModal jar={showJarHistoryJar} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
-      {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handlePrefillTransaction} />}
+      {showScanner && <ReceiptScannerModal role={role} onClose={() => setShowScanner(false)} onConfirm={handlePrefillTransaction} onSaveMany={handleSaveMany} />}
       {showVoice && <VoiceEntryModal role={role} onClose={() => setShowVoice(false)} onConfirm={handlePrefillTransaction} />}
       {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} initialData={editingGold} role={role} />}
       {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
