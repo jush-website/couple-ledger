@@ -11,8 +11,9 @@ export const getModel = () => process.env.NVIDIA_MODEL || DEFAULT_MODEL;
 
 // 免費的 NIM 端點名額很少，熱門模型常回 503「Worker local total request limit reached (16/16)」。
 // 主模型忙線或下架時依序改用這些備用模型（都能看圖，也能處理純文字）。
+// 11B 放前面：實測 90B 在忙的時候會 30 秒都不回應，小模型通常快很多。
 // 備用模型本身也可能哪天退役，退役的會直接跳過，不會卡住。
-const FALLBACK_MODELS = ['meta/llama-3.2-90b-vision-instruct', 'meta/llama-3.2-11b-vision-instruct'];
+const FALLBACK_MODELS = ['meta/llama-3.2-11b-vision-instruct', 'meta/llama-3.2-90b-vision-instruct'];
 export const getModelChain = () => [...new Set([getModel(), ...FALLBACK_MODELS])];
 
 export class NimError extends Error {
@@ -37,8 +38,10 @@ export const getApiKey = () => {
 const isBusy = (status) => status === 429 || status >= 500;
 // 模型不存在、已退役，或不吃我們送的參數：重試沒用，直接換下一個模型
 const isModelUnusable = (status) => status === 400 || status === 404 || status === 410 || status === 422;
-// 單次請求上限，以及所有重試加起來的總上限：上游卡住時不要讓使用者一直轉圈圈
+// 單次請求上限，以及所有重試加起來的總上限：上游卡住時不要讓使用者一直轉圈圈。
+// 主模型給比較久（看圖本來就慢）；備用模型卡住就早點換下一個。
 const REQUEST_TIMEOUT_MS = 30_000;
+const FALLBACK_TIMEOUT_MS = 12_000;
 const TOTAL_BUDGET_MS = 55_000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -96,7 +99,8 @@ export const callNim = async (content, { maxTokens = 1024, temperature = 0.1, re
     for (let attempt = 0; attempt < 2; attempt++) {
       const remaining = deadline - Date.now();
       if (remaining < 1000) break attempts;
-      const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, remaining);
+      const perRequest = model === getModel() ? REQUEST_TIMEOUT_MS : FALLBACK_TIMEOUT_MS;
+      const timeoutMs = Math.min(perRequest, remaining);
       const result = await requestOnce(model, content, { maxTokens, temperature, timeoutMs });
       if (result.ok) {
         if (model !== getModel()) console.warn('NVIDIA fallback model used', model);

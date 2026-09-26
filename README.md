@@ -33,6 +33,7 @@ api/
   receipt.js       收據辨識 → 品項清單
   parse-entry.js   語音文字 → 記帳欄位
   *.test.mjs       node api/_nim.test.mjs / receipt.test.mjs / parse-entry.test.mjs
+                   （前端的純函式測試：node src/lib/budget.test.mjs / quickPicks.test.mjs）
 src/
   lib/
     firebase.js  Firebase init + Firestore 路徑 helper
@@ -41,7 +42,9 @@ src/
     speech.js    瀏覽器聽寫能力偵測
     theme.js     主題清單與 useTheme
     constants.js CATEGORIES、備份集合清單
-  components/    23 個元件
+    budget.js    每月預算計算（+ budget.test.mjs）
+    quickPicks.js「記一筆」的常用項目（+ quickPicks.test.mjs）
+  components/    24 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -53,6 +56,31 @@ src/
 - firebase / react / lucide-react 拆成獨立 chunk（`vite.config.js`），改 App 程式碼不會讓這些大檔的快取失效；
   `/assets/*` 在 `vercel.json` 設了一年 immutable 快取（檔名有 hash，內容變了檔名就會變）。
 - `/api/gold` 同時向台銀與 Yahoo 發請求，回應由 Vercel CDN 快取 5 分鐘；前端切回黃金頁時 5 分鐘內也不重抓。
+
+## 加到主畫面與離線使用
+
+- `public/manifest.webmanifest` + `public/icons/`：手機瀏覽器選「加到主畫面」就能像 App 一樣全螢幕開啟。
+  狀態列顏色登入後會跟著角色與主題變（`App.jsx` 設定 `meta[name=theme-color]`）。
+- `public/sw.js`：只快取網頁外殼與 `/assets/*`，**HTML 一律先走網路**，所以新版部署後馬上生效。
+  不碰 `/api/*` 和 Firebase。改了快取策略要把裡面的 `CACHE` 版本號加一。
+- `src/lib/firebase.js` 開了 Firestore 的 `persistentLocalCache`（IndexedDB）：打開時先顯示上次的資料，
+  沒訊號也能記帳，連線後自動同步。
+  - 記帳、存帳本、收據多筆匯入不再 `await` 寫入（離線時那個 promise 要等連上伺服器才會 resolve），
+    走 `commitInBackground`，失敗時才跳 toast。
+  - 帳本監聽只在「伺服器確認是空的」（`!fromCache`）時才自動建第一本帳，否則快取剛開、還沒資料時會多建一本。
+  - 存錢罐的 `runTransaction` 本來就需要連線，離線時會失敗，這是 Firestore 的限制。
+
+## 每月預算
+
+帳本文件多一個**選填**欄位 `budget: { total, categories: { food: 8000, … } }`，在「編輯帳本」設定。
+沒有這個欄位＝沒設預算，舊資料不受影響。總覽頁只顯示快用完（≥80%）或超支的分類，統計頁顯示該月全部。
+月份比對用交易 `date` 字串的 `YYYY-MM` 前綴，不經過 `new Date()`，避免時區把月底算到下個月。
+
+## 常用項目與搜尋
+
+- 「記一筆」上方列出最近 200 筆裡最常重複的「備註＋分類＋金額＋分帳」組合，點一下只帶入欄位，還是要按 ✓ 才存。
+  自訂金額／比例分帳不列入（明細跟當次金額綁定）。
+- 統計頁搜尋時可切換「本月／全部月份」。
 
 ## 換主題
 
@@ -69,7 +97,10 @@ src/
 
 `ReceiptScannerModal` → `compressForOcr`（壓到 170KB 以下）→ `POST /api/receipt`
 → NVIDIA `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（關閉思考模式）→ 正規化成
-`{ date, items: [{name, price, category}], total }` → 帶入記帳表單。
+`{ date, items: [{name, price, category}], total }` → 使用者勾選品項後二選一：
+- **合併成一筆**：帶入記帳表單（原本的流程）。
+- **每項各記一筆**：在同一個畫面選付款人與每個品項的分帳方式（平分／男友／女友），
+  按「記 N 筆」用 `writeBatch` 一次寫入（`handleSaveMany`）。這個畫面列出每一筆的金額與分帳，本身就是確認畫面。
 
 ## 語音記帳
 
@@ -92,7 +123,7 @@ src/
 
 免費端點名額很少，熱門模型常回 503「Worker local total request limit reached」。`callNim` 會：
 忙線（429／5xx／逾時）同一模型等 1 秒重試一次 → 還是不行就換備用模型（`FALLBACK_MODELS`，
-Llama 3.2 Vision）；下架或參數不合（400／404／410）直接換下一個；金鑰錯誤（401／403）立刻停。
+先 Llama 3.2 Vision 11B 再 90B，備用模型單次最多等 12 秒）；下架或參數不合（400／404／410）直接換下一個；金鑰錯誤（401／403）立刻停。
 全部重試加起來最多 55 秒。邏輯的測試在 `node api/_nim.test.mjs`。
 
 辨識結果一律只是「預先填好」，**永遠經過確認畫面才寫進 Firestore**。

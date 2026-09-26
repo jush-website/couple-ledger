@@ -1,5 +1,8 @@
 import { initializeApp } from 'firebase/app';
-import { collection, doc, getFirestore } from 'firebase/firestore';
+import {
+  collection, doc, getFirestore, initializeFirestore,
+  persistentLocalCache, persistentMultipleTabManager,
+} from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 
 // 一定要用 import.meta.env.VITE_XXX 這種「字面屬性」寫法：
@@ -33,7 +36,22 @@ try {
 }
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// 資料存一份在瀏覽器的 IndexedDB：
+//   - 打開時先顯示上次的資料，不用等整包重新下載
+//   - 沒訊號也能記帳，恢復連線後自動同步給另一半
+// multipleTabManager 讓同時開好幾個分頁也能共用同一份快取。
+// initializeFirestore 只能呼叫一次（HMR 重新執行這個檔案時會丟錯），這時沿用既有的實例。
+const createDb = () => {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    return getFirestore(app);
+  }
+};
+export const db = createDb();
 export const googleProvider = new GoogleAuthProvider();
 
 /* ---------------------------------------------------------------------------
