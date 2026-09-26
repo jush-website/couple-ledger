@@ -9,6 +9,12 @@ const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const DEFAULT_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
 export const getModel = () => process.env.NVIDIA_MODEL || DEFAULT_MODEL;
 
+// 免費的 NIM 端點名額很少，熱門模型常回 503「Worker local total request limit reached (16/16)」。
+// 主模型忙線或下架時依序改用這些備用模型（都能看圖，也能處理純文字）。
+// 備用模型本身也可能哪天退役，退役的會直接跳過，不會卡住。
+const FALLBACK_MODELS = ['meta/llama-3.2-90b-vision-instruct', 'meta/llama-3.2-11b-vision-instruct'];
+export const getModelChain = () => [...new Set([getModel(), ...FALLBACK_MODELS])];
+
 export class NimError extends Error {
   constructor(message, status) {
     super(message);
@@ -27,41 +33,94 @@ export const getApiKey = () => {
   return key;
 };
 
-// content 可以是純文字，或 OpenAI 格式的 content parts（給圖片用）
-export const callNim = async (content, { maxTokens = 1024, temperature = 0.1 } = {}) => {
-  const upstream = await fetch(NIM_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${getApiKey()}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      model: getModel(),
-      messages: [{ role: 'user', content }],
-      temperature,
-      max_tokens: maxTokens,
-      stream: false,
-      // 新模型預設會先「想」一大段再回答：抽欄位用不到，只會變慢、還可能把 max_tokens 用完。
-      // 不支援這個參數的模型會直接忽略它。
-      chat_template_kwargs: { enable_thinking: false },
-    }),
-  });
+// 忙線／暫時性錯誤：同一個模型等一下再試一次，還是不行就換下一個模型
+const isBusy = (status) => status === 429 || status >= 500;
+// 模型不存在、已退役，或不吃我們送的參數：重試沒用，直接換下一個模型
+const isModelUnusable = (status) => status === 400 || status === 404 || status === 410 || status === 422;
+// 單次請求上限，以及所有重試加起來的總上限：上游卡住時不要讓使用者一直轉圈圈
+const REQUEST_TIMEOUT_MS = 30_000;
+const TOTAL_BUDGET_MS = 55_000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const requestOnce = async (model, content, { maxTokens, temperature, timeoutMs }) => {
+  let upstream;
+  try {
+    upstream = await fetch(NIM_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${getApiKey()}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        temperature,
+        max_tokens: maxTokens,
+        stream: false,
+        // Nemotron 預設會先「想」一大段再回答：抽欄位用不到，只會變慢、還可能把 max_tokens 用完。
+        // 只送給 Nemotron，其他模型不認得這個參數，有的會直接回 400。
+        ...(model.includes('nemotron') ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    // 逾時或連線失敗，當成忙線處理
+    console.error('NVIDIA API unreachable', model, e.message);
+    return { ok: false, status: 503 };
+  }
 
   if (!upstream.ok) {
-    const detail = await upstream.text();
-    console.error('NVIDIA API error', upstream.status, detail.slice(0, 500));
-    // 404／410＝模型不存在或已退役，這不是重試能解決的，畫面上直接講清楚要做什麼
-    const hint = upstream.status === 404 || upstream.status === 410
-      ? `（模型 ${getModel()} 已下架，請在 Vercel 設定 NVIDIA_MODEL 換一個）`
-      : '';
-    throw new NimError(`辨識服務回應 ${upstream.status}${hint}`, 502);
+    const detail = await upstream.text().catch(() => '');
+    console.error('NVIDIA API error', model, upstream.status, detail.slice(0, 500));
+    return { ok: false, status: upstream.status };
   }
 
   const data = await upstream.json();
   const text = data?.choices?.[0]?.message?.content;
-  if (!text) throw new NimError('辨識服務沒有回傳內容', 502);
-  return text;
+  if (!text) {
+    console.error('NVIDIA API empty content', model);
+    return { ok: false, status: 502 };
+  }
+  return { ok: true, text };
+};
+
+// content 可以是純文字，或 OpenAI 格式的 content parts（給圖片用）
+export const callNim = async (content, { maxTokens = 1024, temperature = 0.1, retryDelayMs = 1000 } = {}) => {
+  getApiKey(); // 沒設金鑰就別一個一個模型試了，直接回明確的錯誤
+  const statuses = [];
+  const deadline = Date.now() + TOTAL_BUDGET_MS;
+
+  attempts: for (const model of getModelChain()) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining < 1000) break attempts;
+      const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, remaining);
+      const result = await requestOnce(model, content, { maxTokens, temperature, timeoutMs });
+      if (result.ok) {
+        if (model !== getModel()) console.warn('NVIDIA fallback model used', model);
+        return result.text;
+      }
+      statuses.push(result.status);
+
+      // 金鑰無效或沒權限：換模型也一樣，直接停
+      if (result.status === 401 || result.status === 403) {
+        throw new NimError(`辨識服務回應 ${result.status}（NVIDIA_API_KEY 無效或已過期）`, 502);
+      }
+      if (isModelUnusable(result.status)) break;
+      if (isBusy(result.status) && attempt === 0) await sleep(retryDelayMs);
+    }
+  }
+
+  // 全部都失敗：分成「NVIDIA 太忙」與「模型都下架了」兩種，讓畫面上的訊息指得出下一步
+  if (statuses.length === 0 || statuses.some(isBusy)) {
+    throw new NimError('辨識服務目前太忙（NVIDIA 免費額度的排隊已滿），請過一兩分鐘再試。', 503);
+  }
+  throw new NimError(
+    `辨識服務回應 ${statuses.at(-1)}（模型 ${getModel()} 與備用模型都無法使用，請在 Vercel 設定 NVIDIA_MODEL 換一個）`,
+    502
+  );
 };
 
 // 模型偶爾會用 ```json 圍籬包起來，或在 JSON 前後多講幾句話。
