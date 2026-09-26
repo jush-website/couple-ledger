@@ -18,7 +18,8 @@ npm run dev
 | 變數 | 用途 |
 |---|---|
 | `VITE_FIREBASE_*`（6 個必填 + `MEASUREMENT_ID` 選填）| 前端 Firebase 設定 |
-| `NVIDIA_API_KEY` | 收據辨識，只在 `/api/receipt` 伺服器端使用 |
+| `NVIDIA_API_KEY` | 收據辨識與語音記帳，只在 `/api/*` 伺服器端使用 |
+| `NVIDIA_MODEL`（選填）| 換 NIM 模型用，不填就用 `api/_nim.js` 的預設值 |
 
 `VITE_` 開頭的值一定會出現在前端 bundle 裡，這是 Firebase Web SDK 的正常運作方式；
 真正的存取控制在 Firestore security rules。`NVIDIA_API_KEY` 沒有 `VITE_` 前綴，不會進 bundle。
@@ -67,7 +68,7 @@ src/
 ## 收據辨識
 
 `ReceiptScannerModal` → `compressForOcr`（壓到 170KB 以下）→ `POST /api/receipt`
-→ NVIDIA `nvidia/nemotron-nano-12b-v2-vl` → 正規化成
+→ NVIDIA `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`（關閉思考模式）→ 正規化成
 `{ date, items: [{name, price, category}], total }` → 帶入記帳表單。
 
 ## 語音記帳
@@ -84,6 +85,10 @@ src/
 「沒有金額就回 `{"amount": null}`」，否則模型會照抄範例值。
 
 ## 兩個 AI 功能的共同原則
+
+兩者共用 `api/_nim.js` 的同一個模型。**NIM 的模型會退役**：原本的
+`nvidia/nemotron-nano-12b-v2-vl` 在 2026-08-26 下架，兩個功能同時壞掉、畫面顯示「辨識服務回應 410」。
+下次再看到 404／410，到 build.nvidia.com 挑一個能看圖的模型，在 Vercel 設 `NVIDIA_MODEL` 後重新部署即可。
 
 辨識結果一律只是「預先填好」，**永遠經過確認畫面才寫進 Firestore**。
 兩者都走 `handlePrefillTransaction`，它塞給 `editingTransaction` 的物件沒有 `id`，
