@@ -1,25 +1,27 @@
 // 金額／重量格式化、計算機字串求值、分帳金額、圖片壓縮。
 // 都是純函式，不依賴 React 或 Firebase。
 
+// Intl.NumberFormat 建構成本很高，列表每一列都會呼叫好幾次，所以建一次重複用。
+const moneyFmt = new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 });
+const fixedFmt = (digits) => new Intl.NumberFormat('zh-TW', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const weightFmt = {
+  tw_qian: { fmt: fixedFmt(2), divisor: 3.75, suffix: '錢' },
+  tw_liang: { fmt: fixedFmt(3), divisor: 37.5, suffix: '兩' },
+  kg: { fmt: fixedFmt(4), divisor: 1000, suffix: '公斤' },
+  g: { fmt: fixedFmt(2), divisor: 1, suffix: '克' },
+};
+
 export const formatMoney = (amount) => {
   const num = Number(amount);
   if (isNaN(num)) return '$0';
-  return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(num);
+  return moneyFmt.format(num);
 };
 
 export const formatWeight = (grams, unit = 'g') => {
     const num = Number(grams);
     if (isNaN(num)) return '0.00';
-    if (unit === 'tw_qian') {
-        return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num / 3.75) + '錢';
-    }
-    if (unit === 'tw_liang') {
-        return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(num / 37.5) + '兩';
-    }
-    if (unit === 'kg') {
-        return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(num / 1000) + '公斤';
-    }
-    return new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num) + '克';
+    const { fmt, divisor, suffix } = weightFmt[unit] || weightFmt.g;
+    return fmt.format(num / divisor) + suffix;
 };
 
 export const safeCalculate = (expression) => {
@@ -49,7 +51,7 @@ export const safeCalculate = (expression) => {
       if (op === '-') result -= next;
     }
     return isNaN(result) || !isFinite(result) ? '' : result.toString();
-  } catch (e) {
+  } catch {
     return '';
   }
 };

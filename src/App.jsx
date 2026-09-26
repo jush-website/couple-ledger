@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   addDoc, onSnapshot, deleteDoc, updateDoc, serverTimestamp,
   writeBatch, query, where, getDocs, runTransaction
@@ -20,20 +20,54 @@ import AppLoading from './components/AppLoading.jsx';
 import AuthAndPairing from './components/AuthAndPairing.jsx';
 import NavBtn from './components/NavBtn.jsx';
 import Overview from './components/Overview.jsx';
-import Statistics from './components/Statistics.jsx';
-import Savings from './components/Savings.jsx';
-import GoldView from './components/GoldView.jsx';
-import SettingsView from './components/SettingsView.jsx';
 import AddTransactionModal from './components/AddTransactionModal.jsx';
-import AddJarModal from './components/AddJarModal.jsx';
-import DepositModal from './components/DepositModal.jsx';
-import JarHistoryModal from './components/JarHistoryModal.jsx';
-import ReceiptScannerModal from './components/ReceiptScannerModal.jsx';
-import VoiceEntryModal from './components/VoiceEntryModal.jsx';
-import AddGoldModal from './components/AddGoldModal.jsx';
-import RouletteModal from './components/RouletteModal.jsx';
-import RepaymentModal from './components/RepaymentModal.jsx';
-import BookManagerModal from './components/BookManagerModal.jsx';
+
+// 首頁（總覽＋記一筆）以外的分頁與對話框都延後載入，首屏只下載真正會看到的程式碼。
+// 登入後會在瀏覽器閒置時預先抓好（見 prefetchLazyChunks），所以切換時不會卡頓。
+const lazyImports = {
+  Statistics: () => import('./components/Statistics.jsx'),
+  Savings: () => import('./components/Savings.jsx'),
+  GoldView: () => import('./components/GoldView.jsx'),
+  SettingsView: () => import('./components/SettingsView.jsx'),
+  AddJarModal: () => import('./components/AddJarModal.jsx'),
+  DepositModal: () => import('./components/DepositModal.jsx'),
+  JarHistoryModal: () => import('./components/JarHistoryModal.jsx'),
+  ReceiptScannerModal: () => import('./components/ReceiptScannerModal.jsx'),
+  VoiceEntryModal: () => import('./components/VoiceEntryModal.jsx'),
+  AddGoldModal: () => import('./components/AddGoldModal.jsx'),
+  RouletteModal: () => import('./components/RouletteModal.jsx'),
+  RepaymentModal: () => import('./components/RepaymentModal.jsx'),
+  BookManagerModal: () => import('./components/BookManagerModal.jsx'),
+};
+const Statistics = lazy(lazyImports.Statistics);
+const Savings = lazy(lazyImports.Savings);
+const GoldView = lazy(lazyImports.GoldView);
+const SettingsView = lazy(lazyImports.SettingsView);
+const AddJarModal = lazy(lazyImports.AddJarModal);
+const DepositModal = lazy(lazyImports.DepositModal);
+const JarHistoryModal = lazy(lazyImports.JarHistoryModal);
+const ReceiptScannerModal = lazy(lazyImports.ReceiptScannerModal);
+const VoiceEntryModal = lazy(lazyImports.VoiceEntryModal);
+const AddGoldModal = lazy(lazyImports.AddGoldModal);
+const RouletteModal = lazy(lazyImports.RouletteModal);
+const RepaymentModal = lazy(lazyImports.RepaymentModal);
+const BookManagerModal = lazy(lazyImports.BookManagerModal);
+
+const prefetchLazyChunks = () => {
+  const run = () => Object.values(lazyImports).forEach((load) => load().catch(() => {}));
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 3000 });
+  else setTimeout(run, 1500);
+};
+
+// 金價在切換分頁時不必每次重抓；5 分鐘內的資料直接沿用，右上角的重新整理鈕仍可強制更新。
+const GOLD_CACHE_MS = 5 * 60 * 1000;
+// 本機自動備份會把整份資料 JSON.stringify 後寫進 localStorage（同步、會卡主執行緒），
+// 連續幾筆快照更新時只需要寫最後一次。
+const AUTO_BACKUP_DEBOUNCE_MS = 2000;
+
+const TabFallback = () => (
+  <div className="flex justify-center py-16"><div className="w-8 h-8 border-4 border-gray-200 border-t-gray-500 rounded-full animate-spin" /></div>
+);
 
 // --- Main App Component ---
 export default function App() {
@@ -55,7 +89,7 @@ export default function App() {
   const [showAddJar, setShowAddJar] = useState(false);
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
-  const [showJarHistory, setShowJarHistory] = useState(null); 
+  const [showJarHistory, setShowJarHistory] = useState(null); // 存 jar id，畫面用 jars 裡的最新資料
   const [repaymentDebt, setRepaymentDebt] = useState(null);
   const [showRoulette, setShowRoulette] = useState(false);
   const [showAddGold, setShowAddGold] = useState(false);
@@ -82,16 +116,22 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-         try { await signInWithCustomToken(auth, __initial_auth_token); } catch(e) {}
+         try { await signInWithCustomToken(auth, __initial_auth_token); } catch { /* Canvas 以外的環境沒有這個 token */ }
       }
     };
     initAuth();
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (u) => {
+    // onAuthStateChanged 的 callback 回傳值會被忽略，原本 `return () => unsubProfile()`
+    // 根本不會執行：每次登出再登入都會多掛一個 profile 監聽，舊帳號的監聽也不會停。
+    let unsubProfile = null;
+    const stopProfile = () => { if (unsubProfile) { unsubProfile(); unsubProfile = null; } };
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+        stopProfile();
         setUser(u);
         if (u) {
             const profileRef = profileDoc(u.uid);
-            const unsubProfile = onSnapshot(profileRef, (docSnap) => {
+            unsubProfile = onSnapshot(profileRef, (docSnap) => {
                 if (docSnap.exists()) {
                     setProfile(docSnap.data());
                 } else {
@@ -102,17 +142,18 @@ export default function App() {
                 console.error("Failed to fetch profile", err);
                 setLoadingAuth(false);
             });
-            return () => unsubProfile();
         } else {
             setProfile(null);
             setLoadingAuth(false);
         }
     });
 
-    return () => unsubscribeAuth();
+    return () => { unsubscribeAuth(); stopProfile(); };
   }, []);
 
-  const fetchGoldPrice = async () => {
+  const goldFetchedAt = useRef(0);
+  const fetchGoldPrice = useCallback(async ({ force = true } = {}) => {
+      if (!force && Date.now() - goldFetchedAt.current < GOLD_CACHE_MS) return;
       setGoldLoading(true); setGoldError(null);
       try {
           const response = await fetch('/api/gold');
@@ -154,13 +195,14 @@ export default function App() {
               setGoldPrice(price); 
               setGoldHistory(fetchedHistory); 
               setGoldIntraday(fetchedIntraday);
+              goldFetchedAt.current = Date.now();
           } else { throw new Error(data.error || '無法讀取資料'); }
       } catch (err) {
           console.error("Gold Fetch Error:", err);
           setGoldError(`資料連線失敗: ${err.message}`);
           setGoldPrice(2880); setGoldHistory([{date:'-', price: 2880, label: '-'}]);
       } finally { setGoldLoading(false); }
-  };
+  }, []);
 
   // --- 本機設備自動備份邏輯 ---
   useEffect(() => {
@@ -168,23 +210,26 @@ export default function App() {
       // 不要備份剛載入時的空資料
       if (books.length === 0 && transactions.length === 0 && jars.length === 0) return;
 
-      const backupData = {
-          timestamp: new Date().toISOString(),
-          version: 1,
-          data: {
-              books,
-              transactions,
-              savings_jars: jars,
-              gold_transactions: goldTransactions
+      const timer = setTimeout(() => {
+          const backupData = {
+              timestamp: new Date().toISOString(),
+              version: 1,
+              data: {
+                  books,
+                  transactions,
+                  savings_jars: jars,
+                  gold_transactions: goldTransactions
+              }
+          };
+
+          try {
+              localStorage.setItem(`auto_backup_${profile.coupleId}`, JSON.stringify(backupData));
+              setAutoBackupTime(backupData.timestamp);
+          } catch (e) {
+              console.error("Auto backup failed", e);
           }
-      };
-      
-      try {
-          localStorage.setItem(`auto_backup_${profile.coupleId}`, JSON.stringify(backupData));
-          setAutoBackupTime(backupData.timestamp);
-      } catch (e) {
-          console.error("Auto backup failed", e);
-      }
+      }, AUTO_BACKUP_DEBOUNCE_MS);
+      return () => clearTimeout(timer);
   }, [books, transactions, jars, goldTransactions, profile?.coupleId, loadingAuth]);
 
   useEffect(() => {
@@ -195,7 +240,7 @@ export default function App() {
                   const parsed = JSON.parse(stored);
                   setAutoBackupTime(parsed.timestamp);
               }
-          } catch(e) {}
+          } catch { /* 備份檔壞掉就當作沒有 */ }
       }
   }, [profile?.coupleId]);
 
@@ -254,18 +299,18 @@ export default function App() {
                   }
               }
           });
-      } catch(e) {
+      } catch {
           showToast('讀取自動備份失敗 ❌');
       }
   };
   // -----------------------------
 
   useEffect(() => {
-      if (activeTab === 'gold') fetchGoldPrice();
-  }, [activeTab]);
+      if (activeTab === 'gold') fetchGoldPrice({ force: false });
+  }, [activeTab, fetchGoldPrice]);
 
   useEffect(() => {
-    if (!user || !profile?.coupleId) return;
+    if (!user?.uid || !profile?.coupleId) return;
     const cid = profile.coupleId;
 
     try {
@@ -309,7 +354,9 @@ export default function App() {
 
         return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); };
     } catch (e) { console.error(e); }
-  }, [user, profile]);
+    // 只看 uid 與 coupleId：profile 每次快照都是新物件，原本依賴整個 profile
+    // 會讓四個集合的監聽全部退訂再重訂一次（重新下載全部資料）。
+  }, [user?.uid, profile?.coupleId]);
 
   const filteredTransactions = useMemo(() => {
       if (!activeBookId) return [];
@@ -319,12 +366,28 @@ export default function App() {
 
   const displayBooks = useMemo(() => books.filter(b => (b.status || 'active') === (viewArchived ? 'archived' : 'active')), [books, viewArchived]);
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
-  
-  const copyCode = () => {
-      const el = document.getElementById('pairing-code-input');
-      el.select();
-      document.execCommand('copy');
+  // 連續跳兩個 toast 時，第一個的計時器不能把第二個提早關掉
+  const toastTimer = useRef(null);
+  const showToast = (msg) => {
+      clearTimeout(toastTimer.current);
+      setToast(msg);
+      toastTimer.current = setTimeout(() => setToast(null), 3000);
+  };
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  // 登入完成後才預先抓其他分頁的程式碼，不跟首屏搶頻寬
+  const isReady = !!(user && profile);
+  useEffect(() => { if (isReady) prefetchLazyChunks(); }, [isReady]);
+
+  const copyCode = async () => {
+      try {
+          await navigator.clipboard.writeText(profile.coupleId);
+      } catch {
+          // 非 HTTPS 或舊瀏覽器沒有 Clipboard API，退回舊做法
+          const el = document.getElementById('pairing-code-input');
+          el.select();
+          document.execCommand('copy');
+      }
       showToast('配對碼已複製 📋');
   };
 
@@ -595,6 +658,8 @@ export default function App() {
   }
 
   const role = profile.role;
+  // 罐子在別的裝置被刪掉時 find 會拿到 undefined，這時就不要再開著紀錄視窗
+  const showJarHistoryJar = showJarHistory ? jars.find(j => j.id === showJarHistory) : null;
 
   return (
     <div className="min-h-screen w-full bg-gray-50 font-sans text-gray-800 pb-24">
@@ -636,18 +701,20 @@ export default function App() {
             <Overview transactions={filteredTransactions} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => setRepaymentDebt(debt)} />
         )}
 
+        <Suspense fallback={<TabFallback />}>
         {activeTab === 'stats' && (
             <div><div className="bg-surface px-4 py-2 rounded-xl shadow-xs mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600"><Book size={14}/> 統計範圍: {books.find(b => b.id === activeBookId)?.name || '未知帳本'}</div><Statistics transactions={filteredTransactions} /></div>
         )}
         {activeTab === 'savings' && (
-            <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j)} onOpenRoulette={() => setShowRoulette(true)} onComplete={handleCompleteJar} />
+            <Savings jars={jars} role={role} onAdd={() => { setEditingJar(null); setShowAddJar(true); }} onEdit={(j) => { setEditingJar(j); setShowAddJar(true); }} onDeposit={(id) => setShowJarDeposit(id)} onDelete={handleDeleteJar} onHistory={(j) => setShowJarHistory(j.id)} onOpenRoulette={() => setShowRoulette(true)} onComplete={handleCompleteJar} />
         )}
         {activeTab === 'gold' && (
-            <GoldView transactions={goldTransactions} goldPrice={goldPrice} history={goldHistory} period={goldPeriod} setPeriod={setGoldPeriod} role={role} onAdd={() => { setEditingGold(null); setShowAddGold(true); }} onEdit={(t) => { setEditingGold(t); setShowAddGold(true); }} onDelete={handleDeleteGold} loading={goldLoading} error={goldError} onRefresh={fetchGoldPrice} intraday={goldIntraday} />
+            <GoldView transactions={goldTransactions} goldPrice={goldPrice} history={goldHistory} period={goldPeriod} setPeriod={setGoldPeriod} role={role} onAdd={() => { setEditingGold(null); setShowAddGold(true); }} onEdit={(t) => { setEditingGold(t); setShowAddGold(true); }} onDelete={handleDeleteGold} loading={goldLoading} error={goldError} onRefresh={() => fetchGoldPrice()} intraday={goldIntraday} />
         )}
         {activeTab === 'settings' && (
             <SettingsView role={role} coupleId={profile.coupleId} onCopyCode={copyCode} onLogout={() => { signOut(auth); }} onExport={handleExportBackup} onImport={handleImportBackup} autoBackupTime={autoBackupTime} onRestoreAutoBackup={handleRestoreAutoBackup} theme={theme} onThemeChange={setTheme} />
         )}
+        </Suspense>
       </div>
 
       <div className="fixed bottom-0 left-0 w-full bg-surface border-t border-gray-200 z-50">
@@ -672,15 +739,17 @@ export default function App() {
       )}
 
       {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} />}
+      <Suspense fallback={null}>
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} role={role} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
-      {showJarHistory && <JarHistoryModal jar={showJarHistory} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
+      {showJarHistoryJar && <JarHistoryModal jar={showJarHistoryJar} onClose={() => setShowJarHistory(null)} onUpdateItem={handleUpdateJarHistoryItem} onDeleteItem={handleDeleteJarHistoryItem} />}
       {showScanner && <ReceiptScannerModal onClose={() => setShowScanner(false)} onConfirm={handlePrefillTransaction} />}
       {showVoice && <VoiceEntryModal role={role} onClose={() => setShowVoice(false)} onConfirm={handlePrefillTransaction} />}
-      {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} currentPrice={goldPrice} initialData={editingGold} role={role} />}
+      {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} initialData={editingGold} role={role} />}
       {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
       {repaymentDebt !== null && <RepaymentModal debt={repaymentDebt} onClose={() => setRepaymentDebt(null)} onSave={handleSaveTransaction} />}
       {showBookManager && <BookManagerModal onClose={() => setShowBookManager(false)} onSave={handleSaveBook} onDelete={handleDeleteBook} initialData={editingBook} />}
+      </Suspense>
     </div>
   );
 }

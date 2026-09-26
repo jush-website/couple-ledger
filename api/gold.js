@@ -11,11 +11,21 @@ export default async function handler(req, res) {
     let currentPrice = 0;
     let history = [];
     let intraday = []; 
+    let usedHardFallback = false;
+
+    // 四個上游請求彼此不相依，一起發出去；原本一個接一個等，冷啟動常要好幾秒。
+    // 失敗的請求回 null，下面各階段的判斷跟原本一樣。
+    const get = (url) => fetch(url, { headers }).catch((e) => { console.warn(`Fetch failed: ${url}`, e.message); return null; });
+    const [htmlResponse, csvResponse, gRes, tRes] = await Promise.all([
+        get('https://rate.bot.com.tw/gold?Lang=zh-TW'),
+        get('https://rate.bot.com.tw/gold/csv/0'),
+        get('https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=15m&range=1d'),
+        get('https://query1.finance.yahoo.com/v8/finance/chart/TWD=X?interval=1d&range=1d'),
+    ]);
     
     // --- 階段一：嘗試從 HTML 網頁抓取「台銀即時金價」 ---
     try {
-        const htmlResponse = await fetch('https://rate.bot.com.tw/gold?Lang=zh-TW', { headers });
-        if (htmlResponse.ok) {
+        if (htmlResponse?.ok) {
             const html = await htmlResponse.text();
             const gramRowMatch = html.match(/1\s*公克.*?<\/tr>/s);
             if (gramRowMatch) {
@@ -34,8 +44,7 @@ export default async function handler(req, res) {
     // --- 階段二：無論階段一是否成功，都嘗試抓取 CSV 歷史紀錄 ---
     // (修正：之前的版本如果 currentPrice 是 0 就不會進來這裡，導致週末無法取得歷史價格)
     try {
-        const csvResponse = await fetch('https://rate.bot.com.tw/gold/csv/0', { headers });
-        if (csvResponse.ok) {
+        if (csvResponse?.ok) {
             const csvText = await csvResponse.text();
             const rows = csvText.split('\n').filter(row => row.trim() !== '');
             // CSV 格式：日期, 本行買入, 本行賣出...
@@ -79,15 +88,7 @@ export default async function handler(req, res) {
 
     // --- 階段三：抓取 Yahoo Finance 取得「當天即時走勢」 (Intraday) ---
     try {
-        const yahooGoldUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=15m&range=1d';
-        const yahooTwdUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/TWD=X?interval=1d&range=1d'; 
-
-        const [gRes, tRes] = await Promise.all([
-            fetch(yahooGoldUrl, { headers }),
-            fetch(yahooTwdUrl, { headers })
-        ]);
-
-        if (gRes.ok && tRes.ok) {
+        if (gRes?.ok && tRes?.ok) {
             const gData = await gRes.json();
             const tData = await tRes.json();
             
@@ -160,11 +161,16 @@ export default async function handler(req, res) {
                  currentPrice = history[history.length - 1].price;
              } else {
                  currentPrice = 2880;
+                 usedHardFallback = true;
                  history = [{ date: new Date().toISOString().split('T')[0], price: currentPrice, label: 'Today' }];
              }
          }
     }
 
+    // 讓 Vercel CDN 快取 5 分鐘、過期後 10 分鐘內先回舊資料再背景更新：
+    // 兩個人同時打開黃金頁只會打一次台銀／Yahoo，回應也從 CDN 直接出。
+    // 全部上游都掛掉時的 2880 假資料不要快取，下一個請求要能馬上重試。
+    if (!usedHardFallback) res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
     res.status(200).json({
       success: true,
       currentPrice,

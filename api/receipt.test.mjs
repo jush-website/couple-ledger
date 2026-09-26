@@ -15,6 +15,9 @@ assert.deepEqual(extractJson('```json\n{"a":1}\n```'), { a: 1 });
 // JSON 前後多講了話
 assert.deepEqual(extractJson('這是結果：\n{"a":1}\n以上。'), { a: 1 });
 
+// 推理型模型留下的 <think> 區塊（裡面有大括號）要先拿掉
+assert.deepEqual(extractJson('<think>先想想 {不是答案}</think>\n{"a":1}'), { a: 1 });
+
 // 完全不是 JSON 要丟錯，不能靜靜回 undefined
 assert.throws(() => extractJson('看不懂這張收據'));
 

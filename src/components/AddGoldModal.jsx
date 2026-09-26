@@ -3,7 +3,7 @@ import { RefreshCw, Camera, AlertCircle } from 'lucide-react';
 import { compressImage } from '../lib/format.js';
 import ModalLayout from './ModalLayout.jsx';
 
-const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
+const AddGoldModal = ({ onClose, onSave, initialData, role }) => {
     const [date, setDate] = useState(initialData?.date || new Date().toISOString().split('T')[0]);
     const [unit, setUnit] = useState('g');
     const [weightInput, setWeightInput] = useState(initialData?.weight ? (initialData.weight / (unit==='tw_qian'?3.75 : (unit==='tw_liang'?37.5 : (unit==='kg'?1000:1)))).toString() : '');
@@ -13,7 +13,7 @@ const AddGoldModal = ({ onClose, onSave, currentPrice, initialData, role }) => {
     const [photo, setPhoto] = useState(initialData?.photo || null);
     const [owner, setOwner] = useState(initialData?.owner || role);
     const [error, setError] = useState('');
-    const handlePhoto = async (e) => { const file = e.target.files[0]; if (file) { try { const reader = new FileReader(); reader.onloadend = async () => { const compressed = await compressImage(reader.result); setPhoto(compressed); }; reader.readAsDataURL(file); } catch(e) { setError('照片處理失敗'); } } };
+    const handlePhoto = async (e) => { const file = e.target.files[0]; if (file) { try { const reader = new FileReader(); reader.onloadend = async () => { const compressed = await compressImage(reader.result); setPhoto(compressed); }; reader.readAsDataURL(file); } catch { setError('照片處理失敗'); } } };
     const handleSubmit = () => {
         if (!weightInput || !totalCost) { setError('請輸入重量與金額'); return; }
         const weightNum = parseFloat(weightInput); const costNum = parseFloat(totalCost);

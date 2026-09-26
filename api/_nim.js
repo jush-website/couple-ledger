@@ -2,7 +2,12 @@
 // receipt.js（看圖）與 parse-entry.js（看文字）都走這裡。
 
 const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
+// 原本的 nvidia/nemotron-nano-12b-v2-vl 在 2026-08-26 下架（NIM 回 410 Gone），
+// 換成 NVIDIA 同系列的後繼模型，一樣能看圖也能看文字。
+// NIM 的模型會定期退役：下次再遇到 410，到 build.nvidia.com 挑一個能看圖的模型，
+// 在 Vercel 設 NVIDIA_MODEL 就能換，不用改程式。
+const DEFAULT_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
+export const getModel = () => process.env.NVIDIA_MODEL || DEFAULT_MODEL;
 
 export class NimError extends Error {
   constructor(message, status) {
@@ -32,18 +37,25 @@ export const callNim = async (content, { maxTokens = 1024, temperature = 0.1 } =
       Accept: 'application/json',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: getModel(),
       messages: [{ role: 'user', content }],
       temperature,
       max_tokens: maxTokens,
       stream: false,
+      // 新模型預設會先「想」一大段再回答：抽欄位用不到，只會變慢、還可能把 max_tokens 用完。
+      // 不支援這個參數的模型會直接忽略它。
+      chat_template_kwargs: { enable_thinking: false },
     }),
   });
 
   if (!upstream.ok) {
     const detail = await upstream.text();
     console.error('NVIDIA API error', upstream.status, detail.slice(0, 500));
-    throw new NimError(`辨識服務回應 ${upstream.status}`, 502);
+    // 404／410＝模型不存在或已退役，這不是重試能解決的，畫面上直接講清楚要做什麼
+    const hint = upstream.status === 404 || upstream.status === 410
+      ? `（模型 ${getModel()} 已下架，請在 Vercel 設定 NVIDIA_MODEL 換一個）`
+      : '';
+    throw new NimError(`辨識服務回應 ${upstream.status}${hint}`, 502);
   }
 
   const data = await upstream.json();
@@ -52,9 +64,12 @@ export const callNim = async (content, { maxTokens = 1024, temperature = 0.1 } =
   return text;
 };
 
-// 模型偶爾會用 ```json 圍籬包起來，或在 JSON 前後多講幾句話
+// 模型偶爾會用 ```json 圍籬包起來，或在 JSON 前後多講幾句話。
+// 推理型模型就算關掉思考，也可能留下 <think>…</think>，裡面的大括號會干擾下面的找 JSON。
 export const extractJson = (text) => {
-  const stripped = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const stripped = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```json/gi, '').replace(/```/g, '').trim();
   try {
     return JSON.parse(stripped);
   } catch {
