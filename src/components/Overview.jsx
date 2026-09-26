@@ -32,7 +32,7 @@ const Overview = ({ transactions, budget, onEditBudget, onAdd, onEdit, onDelete,
         <div className={`absolute top-0 left-0 w-full h-1 ${Math.abs(debt) < 1 ? 'bg-green-400' : (debt > 0 ? 'bg-blue-400' : 'bg-pink-400')}`}></div>
         <h2 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">本帳本結算</h2>
         <div className="flex items-center justify-center gap-2">{Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500 flex items-center gap-2"><CheckCircle /> 互不相欠</div> : <><span className={`text-3xl font-black ${debt > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debt > 0 ? '男朋友' : '女朋友'}</span><span className="text-gray-400 text-sm">先墊了</span><span className="text-2xl font-bold text-gray-800">{formatMoney(Math.abs(debt))}</span></>}</div>
-        {Math.abs(debt) > 0 && !readOnly && (<button onClick={() => onRepay(debt)} className="mt-4 px-6 py-2 bg-gray-900 text-surface text-sm font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 mx-auto"><RefreshCw size={16} /> 登記還款</button>)}
+        {Math.abs(debt) >= 1 && !readOnly && (<button onClick={() => onRepay(debt)} className="mt-4 px-6 py-2 bg-gray-900 text-surface text-sm font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 mx-auto"><RefreshCw size={16} /> 登記還款</button>)}
       </div>
       <BudgetCard transactions={transactions} budget={budget} monthKey={monthKeyOf(new Date())} compact onEdit={readOnly ? undefined : onEditBudget} />
       <div className="space-y-4">
