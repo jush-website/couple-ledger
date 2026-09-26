@@ -91,6 +91,8 @@ export default function App() {
   const [editingJar, setEditingJar] = useState(null); 
   const [showJarDeposit, setShowJarDeposit] = useState(null);
   const [showJarHistory, setShowJarHistory] = useState(null); // 存 jar id，畫面用 jars 裡的最新資料
+  // 還款也走 handleSaveTransaction，它看 editingTransaction?.id 決定新增或覆蓋，
+  // 所以開還款視窗、關掉編輯視窗時都要把 editingTransaction 清掉，否則會蓋掉上次點開的那筆紀錄。
   const [repaymentDebt, setRepaymentDebt] = useState(null);
   const [showRoulette, setShowRoulette] = useState(false);
   const [showAddGold, setShowAddGold] = useState(false);
@@ -741,7 +743,7 @@ export default function App() {
         )}
         
         {activeTab === 'overview' && (
-            <Overview transactions={filteredTransactions} budget={activeBook?.budget} onEditBudget={() => { setEditingBook(activeBook); setShowBookManager(true); }} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => setRepaymentDebt(debt)} />
+            <Overview transactions={filteredTransactions} budget={activeBook?.budget} onEditBudget={() => { setEditingBook(activeBook); setShowBookManager(true); }} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => { setEditingTransaction(null); setRepaymentDebt(debt); }} />
         )}
 
         <Suspense fallback={<TabFallback />}>
@@ -781,7 +783,7 @@ export default function App() {
         </div>
       )}
 
-      {showAddTransaction && <AddTransactionModal onClose={() => setShowAddTransaction(false)} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} quickPicks={quickPicks} />}
+      {showAddTransaction && <AddTransactionModal onClose={() => { setShowAddTransaction(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} quickPicks={quickPicks} />}
       <Suspense fallback={null}>
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} role={role} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
