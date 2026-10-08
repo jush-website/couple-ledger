@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   addDoc, setDoc, doc, onSnapshot, deleteDoc, updateDoc, serverTimestamp,
-  writeBatch, query, where, getDocs, runTransaction
+  writeBatch, query, where, getDocs, runTransaction, deleteField
 } from 'firebase/firestore';
 import {
   onAuthStateChanged, signInWithCustomToken, signInWithPopup, signOut
@@ -14,6 +14,8 @@ import {
 import { auth, db, googleProvider, coupleCol, coupleDoc, profileDoc } from './lib/firebase.js';
 import { safeCalculate } from './lib/format.js';
 import { getQuickPicks } from './lib/quickPicks.js';
+import { normalizeReservations, reservedForMonth, toTransactionPrefill } from './lib/reservations.js';
+import { monthKeyOf } from './lib/budget.js';
 import { BACKUP_COLLECTIONS } from './lib/constants.js';
 import { useTheme } from './lib/theme.js';
 
@@ -39,6 +41,7 @@ const lazyImports = {
   RouletteModal: () => import('./components/RouletteModal.jsx'),
   RepaymentModal: () => import('./components/RepaymentModal.jsx'),
   BookManagerModal: () => import('./components/BookManagerModal.jsx'),
+  ReservationModal: () => import('./components/ReservationModal.jsx'),
 };
 const Statistics = lazy(lazyImports.Statistics);
 const Savings = lazy(lazyImports.Savings);
@@ -53,6 +56,7 @@ const AddGoldModal = lazy(lazyImports.AddGoldModal);
 const RouletteModal = lazy(lazyImports.RouletteModal);
 const RepaymentModal = lazy(lazyImports.RepaymentModal);
 const BookManagerModal = lazy(lazyImports.BookManagerModal);
+const ReservationModal = lazy(lazyImports.ReservationModal);
 
 const prefetchLazyChunks = () => {
   const run = () => Object.values(lazyImports).forEach((load) => load().catch(() => {}));
@@ -102,6 +106,10 @@ export default function App() {
   const [editingBook, setEditingBook] = useState(null);
   const [showScanner, setShowScanner] = useState(false);
   const [showVoice, setShowVoice] = useState(false);
+  // 預留款：showReservation 開新增／編輯視窗；payingReservation 是按了「付款了」、正在記帳的那一筆
+  const [showReservation, setShowReservation] = useState(false);
+  const [editingReservation, setEditingReservation] = useState(null);
+  const [payingReservation, setPayingReservation] = useState(null);
     
   const [toast, setToast] = useState(null); 
   const [confirmModal, setConfirmModal] = useState({ isOpen: false });
@@ -428,11 +436,18 @@ export default function App() {
       if (editingTransaction?.id) {
         commitInBackground(updateDoc(coupleDoc('transactions', profile.coupleId, editingTransaction.id), { ...cleanData, updatedAt: serverTimestamp() }), '更新沒有存到雲端，請再試一次 ❌');
         savedToast('紀錄已更新 ✨');
+      } else if (payingReservation) {
+        // 預留款付掉了：新增這筆支出、同時解除預留，用同一個 batch 確保兩件事一起成功或一起失敗
+        const batch = writeBatch(db);
+        batch.set(doc(coupleCol('transactions', profile.coupleId)), { ...cleanData, bookId: payingReservation.bookId, createdAt: serverTimestamp() });
+        batch.update(coupleDoc('books', profile.coupleId, payingReservation.bookId), { [`reservations.${payingReservation.id}`]: deleteField() });
+        commitInBackground(batch.commit(), '紀錄沒有存到雲端，請再試一次 ❌');
+        savedToast('已記帳，預留款已解除 🔓');
       } else {
         commitInBackground(addDoc(coupleCol('transactions', profile.coupleId), { ...cleanData, createdAt: serverTimestamp() }), '紀錄沒有存到雲端，請再試一次 ❌');
         savedToast('紀錄已新增 🎉');
       }
-      setShowAddTransaction(false); setEditingTransaction(null); setRepaymentDebt(null);
+      setShowAddTransaction(false); setEditingTransaction(null); setRepaymentDebt(null); setPayingReservation(null);
     } catch (e) { console.error(e); showToast('存檔失敗，請再試一次 ❌'); }
   };
 
@@ -614,6 +629,7 @@ export default function App() {
   // 收據掃描與語音記帳都走這裡：解析結果只是「預先填好」，一定要經過確認畫面才會存檔。
   // 注意這個物件沒有 id —— handleSaveTransaction 是靠 editingTransaction?.id 判斷新增或編輯的。
   const handlePrefillTransaction = (parsed) => {
+    setPayingReservation(null);
     setEditingTransaction({
       amount: parsed.amount,
       note: parsed.note,
@@ -703,6 +719,34 @@ export default function App() {
 
   const role = profile.role;
   const activeBook = books.find(b => b.id === activeBookId);
+  const today = new Date().toLocaleDateString('en-CA');
+  const reservations = normalizeReservations(activeBook?.reservations);
+  const reservedThisMonth = reservedForMonth(reservations, monthKeyOf(new Date()));
+
+  // 預留款存在帳本文件的 reservations.<id>，用欄位路徑更新：兩人同時改不同筆不會互相覆蓋，離線也能寫
+  const handleSaveReservation = (data) => {
+      if (!activeBookId) return;
+      const id = editingReservation?.id || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      const value = { ...data, createdAt: editingReservation?.createdAt || Date.now() };
+      commitInBackground(updateDoc(coupleDoc('books', profile.coupleId, activeBookId), { [`reservations.${id}`]: value }), '預留款沒有存到雲端，請再試一次 ❌');
+      savedToast(editingReservation ? '預留款已更新 ✨' : '已預留這筆錢 🔒');
+      setShowReservation(false); setEditingReservation(null);
+  };
+  const handleDeleteReservation = (id) => {
+      setConfirmModal({ isOpen: true, title: '取消預留', message: '確定不買了、取消這筆預留款嗎？（不會記成支出）', isDanger: true,
+          onConfirm: () => {
+              commitInBackground(updateDoc(coupleDoc('books', profile.coupleId, activeBookId), { [`reservations.${id}`]: deleteField() }), '沒有存到雲端，請再試一次 ❌');
+              savedToast('已取消預留 🗑️');
+              setConfirmModal({ isOpen: false }); setShowReservation(false); setEditingReservation(null);
+          }
+      });
+  };
+  // 「付款了」：帶著預留款的內容打開記一筆，存檔時才解除預留（取消就什麼都不變）
+  const handlePayReservation = (r) => {
+      setPayingReservation({ id: r.id, bookId: activeBookId });
+      setEditingTransaction(toTransactionPrefill(r, role, today));
+      setShowAddTransaction(true);
+  };
   // 罐子在別的裝置被刪掉時 find 會拿到 undefined，這時就不要再開著紀錄視窗
   const showJarHistoryJar = showJarHistory ? jars.find(j => j.id === showJarHistory) : null;
 
@@ -743,7 +787,7 @@ export default function App() {
         )}
         
         {activeTab === 'overview' && (
-            <Overview transactions={filteredTransactions} budget={activeBook?.budget} onEditBudget={() => { setEditingBook(activeBook); setShowBookManager(true); }} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => { setEditingTransaction(null); setRepaymentDebt(debt); }} />
+            <Overview transactions={filteredTransactions} budget={activeBook?.budget} reservations={reservations} reservedThisMonth={reservedThisMonth} today={today} onAddReservation={() => { setEditingReservation(null); setShowReservation(true); }} onEditReservation={(r) => { setEditingReservation(r); setShowReservation(true); }} onPayReservation={handlePayReservation} onEditBudget={() => { setEditingBook(activeBook); setShowBookManager(true); }} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setPayingReservation(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setPayingReservation(null); setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => { setEditingTransaction(null); setPayingReservation(null); setRepaymentDebt(debt); }} />
         )}
 
         <Suspense fallback={<TabFallback />}>
@@ -783,7 +827,7 @@ export default function App() {
         </div>
       )}
 
-      {showAddTransaction && <AddTransactionModal onClose={() => { setShowAddTransaction(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} quickPicks={quickPicks} />}
+      {showAddTransaction && <AddTransactionModal onClose={() => { setShowAddTransaction(false); setEditingTransaction(null); setPayingReservation(null); }} onSave={handleSaveTransaction} currentUserRole={role} initialData={editingTransaction} quickPicks={quickPicks} />}
       <Suspense fallback={null}>
       {showAddJar && <AddJarModal onClose={() => setShowAddJar(false)} onSave={handleSaveJar} initialData={editingJar} role={role} />}
       {showJarDeposit && <DepositModal jar={jars.find(j => j.id === showJarDeposit)} onClose={() => setShowJarDeposit(null)} onConfirm={depositToJar} role={role} />}
@@ -793,6 +837,7 @@ export default function App() {
       {showAddGold && <AddGoldModal onClose={() => setShowAddGold(false)} onSave={handleSaveGold} initialData={editingGold} role={role} />}
       {showRoulette && <RouletteModal jars={jars} role={role} onClose={() => setShowRoulette(false)} onConfirm={depositToJar} />}
       {repaymentDebt !== null && <RepaymentModal debt={repaymentDebt} onClose={() => setRepaymentDebt(null)} onSave={handleSaveTransaction} />}
+      {showReservation && <ReservationModal initialData={editingReservation} role={role} onClose={() => { setShowReservation(false); setEditingReservation(null); }} onSave={handleSaveReservation} onDelete={handleDeleteReservation} />}
       {showBookManager && <BookManagerModal onClose={() => setShowBookManager(false)} onSave={handleSaveBook} onDelete={handleDeleteBook} initialData={editingBook} />}
       </Suspense>
     </div>
