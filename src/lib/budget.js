@@ -26,7 +26,9 @@ const levelOf = (spent, limit) => (spent > limit ? 'over' : spent >= limit * WAR
 
 // monthKey 是 'YYYY-MM'。直接比日期字串的前綴：交易的 date 本來就是 'YYYY-MM-DD'，
 // 不經過 new Date() 就不會有時區換算把月底算到下個月的問題。
-export const getBudgetStatus = (transactions, budget, monthKey) => {
+// reserved（選填）：算進這個月的預留款 [{ amount, category }]。它們還沒花，但錢已經被圈起來，
+// 所以跟已花的加在一起判斷快不快超支；available 就是「還能自由花用」的錢。
+export const getBudgetStatus = (transactions, budget, monthKey, reserved = []) => {
   const b = normalizeBudget(budget);
   const spentBy = {};
   let spent = 0;
@@ -37,17 +39,31 @@ export const getBudgetStatus = (transactions, budget, monthKey) => {
     spentBy[t.category] = (spentBy[t.category] || 0) + amt;
   }
 
+  const reservedBy = {};
+  let reservedTotal = 0;
+  for (const r of reserved) {
+    reservedTotal += r.amount;
+    reservedBy[r.category] = (reservedBy[r.category] || 0) + r.amount;
+  }
+
   const categories = CATEGORIES.filter((c) => b.categories[c.id]).map((c) => {
     const limit = b.categories[c.id];
     const catSpent = spentBy[c.id] || 0;
-    return { id: c.id, name: c.name, color: c.color, spent: catSpent, limit, ratio: catSpent / limit, level: levelOf(catSpent, limit) };
+    const catReserved = reservedBy[c.id] || 0;
+    return {
+      id: c.id, name: c.name, color: c.color, spent: catSpent, reserved: catReserved, limit,
+      ratio: catSpent / limit, reservedRatio: catReserved / limit, level: levelOf(catSpent + catReserved, limit),
+    };
   });
 
   return {
     spent,
+    reserved: reservedTotal,
     total: b.total,
+    available: b.total - spent - reservedTotal,
     ratio: b.total ? spent / b.total : 0,
-    level: b.total ? levelOf(spent, b.total) : 'ok',
+    reservedRatio: b.total ? reservedTotal / b.total : 0,
+    level: b.total ? levelOf(spent + reservedTotal, b.total) : 'ok',
     categories,
   };
 };

@@ -26,4 +26,19 @@ assert.equal(getBudgetStatus(tx, { categories: { food: 100000 } }, '2026-09').le
 assert.equal(getBudgetStatus(tx, { total: 20000 }, '2026-09').level, 'ok');
 
 assert.equal(monthKeyOf(new Date(2026, 0, 5)), '2026-01');
+
+// 預留款：還沒花但算進「已承諾」，影響警示等級與可自由花用金額
+{
+  const base = [{ date: '2026-10-02', amount: 3000, category: 'food' }];
+  const noRes = getBudgetStatus(base, { total: 10000, categories: { shopping: 5000 } }, '2026-10');
+  assert.equal(noRes.level, 'ok');
+  assert.equal(noRes.available, 7000);
+  const withRes = getBudgetStatus(base, { total: 10000, categories: { shopping: 5000 } }, '2026-10', [{ amount: 6000, category: 'shopping' }]);
+  assert.equal(withRes.reserved, 6000);
+  assert.equal(withRes.available, 1000);
+  assert.equal(withRes.level, 'warn');              // 3000 + 6000 = 90%
+  assert.equal(withRes.categories[0].level, 'over'); // 購物預算 5000 被預留 6000 超過
+  assert.equal(withRes.categories[0].spent, 0);
+  assert.equal(withRes.categories[0].reserved, 6000);
+}
 console.log('budget.js OK');

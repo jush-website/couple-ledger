@@ -33,7 +33,7 @@ api/
   receipt.js       收據辨識 → 品項清單
   parse-entry.js   語音文字 → 記帳欄位
   *.test.mjs       node api/_nim.test.mjs / receipt.test.mjs / parse-entry.test.mjs
-                   （前端的純函式測試：node src/lib/budget.test.mjs / quickPicks.test.mjs）
+                   （前端的純函式測試：node src/lib/budget.test.mjs / quickPicks.test.mjs / reservations.test.mjs）
 src/
   lib/
     firebase.js  Firebase init + Firestore 路徑 helper
@@ -44,7 +44,8 @@ src/
     constants.js CATEGORIES、備份集合清單
     budget.js    每月預算計算（+ budget.test.mjs）
     quickPicks.js「記一筆」的常用項目（+ quickPicks.test.mjs）
-  components/    24 個元件
+    reservations.js 預留款（+ reservations.test.mjs）
+  components/    26 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -75,6 +76,19 @@ src/
 帳本文件多一個**選填**欄位 `budget: { total, categories: { food: 8000, … } }`，在「編輯帳本」設定。
 沒有這個欄位＝沒設預算，舊資料不受影響。總覽頁只顯示快用完（≥80%）或超支的分類，統計頁顯示該月全部。
 月份比對用交易 `date` 字串的 `YYYY-MM` 前綴，不經過 `new Date()`，避免時區把月底算到下個月。
+
+## 預留款
+
+預購、後付的東西先把錢「圈起來」，提醒這筆錢不能花。存在帳本文件的選填欄位
+`reservations: { [id]: { name, amount, category, owner, dueDate, createdAt } }`。
+用 map + 欄位路徑 `reservations.<id>` 更新（不是陣列），兩人同時改不同筆不會互相覆蓋，離線也能寫。
+
+- 算進本月預算的是「本月（含逾期）到期」與「沒填付款日」的預留款；下個月以後才付的不算，
+  否則一筆大額預購會讓每個月預算都爆掉。預算卡上以斜線段顯示，「還剩」改叫「可自由花用」＝預算－已花－預留。
+- 按「付款了」會把內容帶進記一筆（共同→平分、個人→該人 100%），**存檔時**用同一個 `writeBatch`
+  新增支出並刪掉該筆預留（`payingReservation`）；取消就什麼都不變。
+  任何其他打開記一筆／還款的入口都要把 `payingReservation` 清掉，不然會誤刪別筆預留。
+- 「取消預留」只刪預留，不記成支出。
 
 ## 常用項目與搜尋
 
