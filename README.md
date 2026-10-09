@@ -33,7 +33,7 @@ api/
   receipt.js       收據辨識 → 品項清單
   parse-entry.js   語音文字 → 記帳欄位
   *.test.mjs       node api/_nim.test.mjs / receipt.test.mjs / parse-entry.test.mjs
-                   （前端的純函式測試：node src/lib/budget.test.mjs / quickPicks.test.mjs / reservations.test.mjs）
+                   （前端的純函式測試：for t in src/lib/*.test.mjs; do node $t; done）
 src/
   lib/
     firebase.js  Firebase init + Firestore 路徑 helper
@@ -45,7 +45,10 @@ src/
     budget.js    每月預算計算（+ budget.test.mjs）
     quickPicks.js「記一筆」的常用項目（+ quickPicks.test.mjs）
     reservations.js 預留款（+ reservations.test.mjs）
-  components/    27 個元件
+    calendar.js  月曆格子、農曆、台灣節日（+ calendar.test.mjs）
+    events.js    行程與重複規則（+ events.test.mjs）
+    anniversaries.js 紀念日天數與里程碑（+ anniversaries.test.mjs）
+  components/    31 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -83,6 +86,23 @@ src/
 展開才顯示分類預算明細、預留款清單與新增按鈕。收合／展開存在 localStorage（`overview-summary-expanded`），
 跟著裝置走。收合時「快用完／超支」的分類與最近一筆預留的倒數照樣顯示顏色，不會因為收起來就看不到警示。
 統計頁的月份預算仍用獨立的 `BudgetCard`；兩邊共用 `BudgetBar` / `BudgetTotal` / `BudgetCategories`。
+
+## 日曆與紀念日
+
+底部導覽的「日曆」分頁，上方切換「日曆／紀念日」。兩個新集合沿用既有的路徑格式：
+`events_{coupleId}`、`anniversaries_{coupleId}`（不分帳本，兩人共用），也已加進 `BACKUP_COLLECTIONS`；
+舊備份檔沒有這兩個集合，還原時會整個跳過、不會被清空。
+
+- **月曆**：週日開始、固定 6 週；每格顯示國曆、農曆（`Intl` 的中國曆，不用套件，初一顯示月份）、
+  節日（國定假日紅底）、紀念日里程碑（♥）、行程。左右滑動或點標題換月份，「今天」跳回本月。
+  篩選（誰的行程、節日、紀念日）存 localStorage。點日期看當天明細並可在那天新增行程。
+- **節日**：國曆固定日、農曆（春節、端午、中秋、重陽、七夕…）、除夕（隔天是正月初一）、清明（節氣公式）、母親節。
+  **補假與調整放假**每年由行政院公告，無法用公式算，沒有處理。
+- **行程**：`{ title, date, time, owner, color, repeat, until, exceptions, note }`。重複規則 none/weekly/monthly/yearly，
+  只存一筆文件，顯示時用 `expandEvents` 展開；每月 31 號、2/29 這種「那個月沒有這天」的會跳過。
+  重複行程「只刪這天」寫進 `exceptions`（`arrayUnion`），修改會套用到整個重複行程。
+- **紀念日**：`since`（累計，6/20→10/9＝已過 111 天，跟一般紀念日 App 相同）、`yearly`（生日）、`countdown`（單次倒數）。
+  里程碑：每 100 天、`SPECIAL_DAYS`（99、111、520、1314…）、每週年；「即將到來」列 30 天內的。
 
 ## 預留款
 

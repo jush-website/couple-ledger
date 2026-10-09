@@ -11,4 +11,5 @@ export const CATEGORIES = [
 
 
 // 備份／還原涵蓋的集合。順序有意義：books 先還原，交易才找得到所屬帳本。
-export const BACKUP_COLLECTIONS = ['books', 'transactions', 'savings_jars', 'gold_transactions'];
+// events / anniversaries 是後來加的：舊備份檔裡沒有這兩個，還原時會整個跳過、不會被清空。
+export const BACKUP_COLLECTIONS = ['books', 'transactions', 'savings_jars', 'gold_transactions', 'events', 'anniversaries'];

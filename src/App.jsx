@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   addDoc, setDoc, doc, onSnapshot, deleteDoc, updateDoc, serverTimestamp,
-  writeBatch, query, where, getDocs, runTransaction, deleteField
+  writeBatch, query, where, getDocs, runTransaction, deleteField, arrayUnion
 } from 'firebase/firestore';
 import {
   onAuthStateChanged, signInWithCustomToken, signInWithPopup, signOut
 } from 'firebase/auth';
 import {
-  Heart, Wallet, PiggyBank, ChartPie, Plus, Settings,
+  Heart, Wallet, PiggyBank, ChartPie, Plus, Settings, CalendarDays,
   CheckCircle, Book, Archive, Coins
 } from 'lucide-react';
 
@@ -16,6 +16,8 @@ import { safeCalculate } from './lib/format.js';
 import { getQuickPicks } from './lib/quickPicks.js';
 import { normalizeReservations, reservedForMonth, toTransactionPrefill } from './lib/reservations.js';
 import { monthKeyOf } from './lib/budget.js';
+import { normalizeEvent } from './lib/events.js';
+import { normalizeAnniversary } from './lib/anniversaries.js';
 import { BACKUP_COLLECTIONS } from './lib/constants.js';
 import { useTheme } from './lib/theme.js';
 
@@ -32,6 +34,7 @@ const lazyImports = {
   Savings: () => import('./components/Savings.jsx'),
   GoldView: () => import('./components/GoldView.jsx'),
   SettingsView: () => import('./components/SettingsView.jsx'),
+  CalendarView: () => import('./components/CalendarView.jsx'),
   AddJarModal: () => import('./components/AddJarModal.jsx'),
   DepositModal: () => import('./components/DepositModal.jsx'),
   JarHistoryModal: () => import('./components/JarHistoryModal.jsx'),
@@ -47,6 +50,7 @@ const Statistics = lazy(lazyImports.Statistics);
 const Savings = lazy(lazyImports.Savings);
 const GoldView = lazy(lazyImports.GoldView);
 const SettingsView = lazy(lazyImports.SettingsView);
+const CalendarView = lazy(lazyImports.CalendarView);
 const AddJarModal = lazy(lazyImports.AddJarModal);
 const DepositModal = lazy(lazyImports.DepositModal);
 const JarHistoryModal = lazy(lazyImports.JarHistoryModal);
@@ -85,6 +89,8 @@ export default function App() {
   const [jars, setJars] = useState([]);
   const [books, setBooks] = useState([]);
   const [goldTransactions, setGoldTransactions] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [anniversaries, setAnniversaries] = useState([]);
   
   const [activeBookId, setActiveBookId] = useState(null);
   const [viewArchived, setViewArchived] = useState(false);
@@ -329,6 +335,8 @@ export default function App() {
         const jarsRef = coupleCol('savings_jars', cid);
         const booksRef = coupleCol('books', cid);
         const goldRef = coupleCol('gold_transactions', cid);
+        const eventsRef = coupleCol('events', cid);
+        const annRef = coupleCol('anniversaries', cid);
         
         const unsubBooks = onSnapshot(booksRef, async (s) => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -366,7 +374,15 @@ export default function App() {
             setGoldTransactions(data);
         }, (e) => console.error(e));
 
-        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); };
+        // 日曆：行程與紀念日（跟帳本無關，兩個人共用）
+        const unsubEvents = onSnapshot(eventsRef, (s) => {
+            setEvents(s.docs.map(d => normalizeEvent({ id: d.id, ...d.data() })).filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e.date)));
+        }, (e) => console.error(e));
+        const unsubAnn = onSnapshot(annRef, (s) => {
+            setAnniversaries(s.docs.map(d => normalizeAnniversary({ id: d.id, ...d.data() })).filter(a => a.date));
+        }, (e) => console.error(e));
+
+        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); unsubEvents(); unsubAnn(); };
     } catch (e) { console.error(e); }
     // 只看 uid 與 coupleId：profile 每次快照都是新物件，原本依賴整個 profile
     // 會讓四個集合的監聽全部退訂再重訂一次（重新下載全部資料）。
@@ -452,6 +468,42 @@ export default function App() {
   };
 
   // 收據「每項各記一筆」：一次寫入多筆，用 batch 確保要嘛全部成功、要嘛全部沒寫
+  // ── 日曆：行程與紀念日 ──
+  // 跟記帳一樣不等伺服器確認（離線也能新增），失敗才跳 toast
+  const handleSaveEvent = (id, data) => {
+      if (!profile) return;
+      if (id) commitInBackground(updateDoc(coupleDoc('events', profile.coupleId, id), { ...data, updatedAt: serverTimestamp() }), '行程沒有存到雲端，請再試一次 ❌');
+      else commitInBackground(addDoc(coupleCol('events', profile.coupleId), { ...data, exceptions: [], createdBy: profile.role, createdAt: serverTimestamp() }), '行程沒有存到雲端，請再試一次 ❌');
+      savedToast(id ? '行程已更新 ✨' : '行程已新增 📅');
+  };
+  const handleDeleteEvent = (id, done) => {
+      setConfirmModal({ isOpen: true, title: '刪除行程', message: '確定要刪除這個行程嗎？重複的行程會整個刪掉。', isDanger: true,
+          onConfirm: () => {
+              commitInBackground(deleteDoc(coupleDoc('events', profile.coupleId, id)), '刪除沒有同步到雲端，請再試一次 ❌');
+              savedToast('行程已刪除 🗑️'); setConfirmModal({ isOpen: false }); done?.();
+          }
+      });
+  };
+  // 重複行程只刪某一天：記在 exceptions，arrayUnion 兩人同時操作也不會互相覆蓋
+  const handleSkipEventDay = (id, date, done) => {
+      commitInBackground(updateDoc(coupleDoc('events', profile.coupleId, id), { exceptions: arrayUnion(date) }), '刪除沒有同步到雲端，請再試一次 ❌');
+      savedToast('這天的行程已刪除 🗑️'); done?.();
+  };
+  const handleSaveAnniversary = (id, data) => {
+      if (!profile) return;
+      if (id) commitInBackground(updateDoc(coupleDoc('anniversaries', profile.coupleId, id), { ...data, updatedAt: serverTimestamp() }), '紀念日沒有存到雲端，請再試一次 ❌');
+      else commitInBackground(addDoc(coupleCol('anniversaries', profile.coupleId), { ...data, createdAt: Date.now() }), '紀念日沒有存到雲端，請再試一次 ❌');
+      savedToast(id ? '紀念日已更新 ✨' : '紀念日已新增 💕');
+  };
+  const handleDeleteAnniversary = (id, done) => {
+      setConfirmModal({ isOpen: true, title: '刪除紀念日', message: '確定要刪除這個紀念日嗎？', isDanger: true,
+          onConfirm: () => {
+              commitInBackground(deleteDoc(coupleDoc('anniversaries', profile.coupleId, id)), '刪除沒有同步到雲端，請再試一次 ❌');
+              savedToast('紀念日已刪除 🗑️'); setConfirmModal({ isOpen: false }); done?.();
+          }
+      });
+  };
+
   const handleSaveMany = (entries) => {
     if (!user || !profile || entries.length === 0) return;
     try {
@@ -791,6 +843,11 @@ export default function App() {
         )}
 
         <Suspense fallback={<TabFallback />}>
+        {activeTab === 'calendar' && (
+            <CalendarView events={events} anniversaries={anniversaries} role={role}
+              onSaveEvent={handleSaveEvent} onDeleteEvent={handleDeleteEvent} onSkipEventDay={handleSkipEventDay}
+              onSaveAnniversary={handleSaveAnniversary} onDeleteAnniversary={handleDeleteAnniversary} />
+        )}
         {activeTab === 'stats' && (
             <div><div className="bg-surface px-4 py-2 rounded-xl shadow-xs mb-4 inline-flex items-center gap-2 text-sm font-bold text-gray-600"><Book size={14}/> 統計範圍: {activeBook?.name || '未知帳本'}</div><Statistics transactions={filteredTransactions} budget={activeBook?.budget} /></div>
         )}
@@ -809,6 +866,7 @@ export default function App() {
       <div className="fixed bottom-0 left-0 w-full bg-surface border-t border-gray-200 z-50">
         <div className="flex justify-around py-3 max-w-2xl mx-auto">
           <NavBtn icon={Wallet} label="總覽" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} role={role} />
+          <NavBtn icon={CalendarDays} label="日曆" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} role={role} />
           <NavBtn icon={ChartPie} label="統計" active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} role={role} />
           <NavBtn icon={PiggyBank} label="存錢" active={activeTab === 'savings'} onClick={() => setActiveTab('savings')} role={role} />
           <NavBtn icon={Coins} label="黃金" active={activeTab === 'gold'} onClick={() => setActiveTab('gold')} role={role} />
