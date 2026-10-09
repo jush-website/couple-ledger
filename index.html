@@ -13,6 +13,55 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="小金庫" />
     <title>我們的小金庫</title>
+    <!--
+      開機保險：這段不靠主程式，直接寫在 HTML 裡。主程式載不起來（手機上留著壞掉的舊快取）時，
+      畫面會整個白掉，而 React 的 ErrorBoundary 也還沒啟動、救不了。
+      這裡記下載入錯誤；10 秒後畫面還是空的，就自動清掉 Service Worker 與快取、強制重抓程式檔、
+      重新整理一次。還是不行才顯示錯誤訊息與「清除快取並重新載入」按鈕。
+      刻意用舊語法（var、function），任何瀏覽器都看得懂。
+    -->
+    <script>
+      (function () {
+        var errors = [];
+        window.addEventListener('error', function (e) {
+          var t = e && e.target;
+          errors.push(t && (t.src || t.href) ? '無法載入 ' + (t.src || t.href) : String((e && e.message) || e));
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) { errors.push(String(e && e.reason && (e.reason.message || e.reason))); });
+
+        function assetUrls() {
+          var urls = [], nodes = document.querySelectorAll('script[src], link[rel="modulepreload"], link[rel="stylesheet"]');
+          for (var i = 0; i < nodes.length; i++) urls.push(nodes[i].src || nodes[i].href);
+          return urls;
+        }
+        function heal() {
+          var jobs = [];
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+          }
+          if (window.caches) jobs.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+          // cache: 'reload' 會略過並覆寫瀏覽器的 HTTP 快取，把存錯的程式檔換掉
+          assetUrls().forEach(function (u) { jobs.push(fetch(u, { cache: 'reload' }).catch(function () {})); });
+          return Promise.all(jobs).catch(function () {});
+        }
+        window.__healAndReload = function () { heal().then(function () { location.reload(); }); };
+
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (!root || root.children.length) return; // 正常啟動了
+          var tried = false;
+          try { tried = sessionStorage.getItem('boot-heal') === '1'; sessionStorage.setItem('boot-heal', '1'); } catch (e) { tried = true; }
+          if (!tried) { window.__healAndReload(); return; }
+          root.innerHTML =
+            '<div style="font-family:sans-serif;max-width:340px;margin:80px auto;padding:24px;text-align:center;color:#374151">' +
+            '<div style="font-size:40px">⚠️</div><h2 style="font-size:18px;margin:12px 0">App 沒有順利啟動</h2>' +
+            '<p style="font-size:13px;color:#6b7280">資料都還在雲端，不會不見。請按下面的按鈕；如果一直出現，請把這個畫面截圖回報。</p>' +
+            '<pre style="font-size:10px;color:#9ca3af;background:#f9fafb;border:1px solid #f3f4f6;border-radius:8px;padding:8px;white-space:pre-wrap;word-break:break-all;text-align:left">' +
+            (errors.join('\n') || '沒有錯誤訊息（可能是網路太慢）').replace(/</g, '&lt;') + '</pre>' +
+            '<button onclick="window.__healAndReload()" style="margin-top:12px;padding:10px 20px;border:0;border-radius:12px;background:#111827;color:#fff;font-weight:bold;font-size:14px">清除快取並重新載入</button></div>';
+        }, 10000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

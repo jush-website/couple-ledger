@@ -76,6 +76,11 @@ src/
   （每個分頁階段只試一次、離線時不試；背景預抓不包，免得把正在用的畫面重整掉）。
 - `ErrorBoundary`：整個 App 一層、分頁內容一層（`key={activeTab}`，切分頁會重來、導覽列不受影響）。
   出錯時顯示錯誤訊息與「重新載入」（會先清 Service Worker 快取），不再是白畫面。
+- `index.html` 裡的**開機保險**（不靠主程式的內嵌 script）：主程式本身載不起來時（手機留著壞掉的舊快取，
+  ErrorBoundary 還沒啟動也救不了），10 秒後畫面仍空白就自動解除 Service Worker、清快取、
+  用 `fetch(url, { cache: 'reload' })` 覆寫瀏覽器 HTTP 快取裡的程式檔，再重新整理一次；
+  還是不行才顯示錯誤訊息與「清除快取並重新載入」按鈕。
+  （修正前 `/assets/*` 的一年 immutable 快取會連「找不到檔案時回的首頁 HTML」一起存，這是手機上白畫面的根源。）
 - `src/lib/firebase.js` 開了 Firestore 的 `persistentLocalCache`（IndexedDB）：打開時先顯示上次的資料，
   沒訊號也能記帳，連線後自動同步。
   - 記帳、存帳本、收據多筆匯入不再 `await` 寫入（離線時那個 promise 要等連上伺服器才會 resolve），
