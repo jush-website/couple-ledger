@@ -45,7 +45,7 @@ src/
     budget.js    每月預算計算（+ budget.test.mjs）
     quickPicks.js「記一筆」的常用項目（+ quickPicks.test.mjs）
     reservations.js 預留款（+ reservations.test.mjs）
-  components/    26 個元件
+  components/    27 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -76,6 +76,13 @@ src/
 帳本文件多一個**選填**欄位 `budget: { total, categories: { food: 8000, … } }`，在「編輯帳本」設定。
 沒有這個欄位＝沒設預算，舊資料不受影響。總覽頁只顯示快用完（≥80%）或超支的分類，統計頁顯示該月全部。
 月份比對用交易 `date` 字串的 `YYYY-MM` 前綴，不經過 `new Date()`，避免時區把月底算到下個月。
+
+## 總覽摘要卡
+
+`SummaryCard` 把「本帳本結算」「本月預算」「預留款」合成一張卡，預設收合（每項一行），
+展開才顯示分類預算明細、預留款清單與新增按鈕。收合／展開存在 localStorage（`overview-summary-expanded`），
+跟著裝置走。收合時「快用完／超支」的分類與最近一筆預留的倒數照樣顯示顏色，不會因為收起來就看不到警示。
+統計頁的月份預算仍用獨立的 `BudgetCard`；兩邊共用 `BudgetBar` / `BudgetTotal` / `BudgetCategories`。
 
 ## 預留款
 

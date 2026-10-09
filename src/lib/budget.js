@@ -2,6 +2,7 @@
 // 舊帳本沒有這個欄位＝沒設預算，其他欄位完全不變。
 // 純函式，不依賴 React 或 Firebase。
 import { CATEGORIES } from './constants.js';
+import { formatMoney } from './format.js';
 
 // 用到八成就提醒，超過就警告
 export const WARN_RATIO = 0.8;
@@ -67,6 +68,10 @@ export const getBudgetStatus = (transactions, budget, monthKey, reserved = []) =
     categories,
   };
 };
+
+// used = 已花＋預留；有預留款時「還剩」改叫「可自由花用」，強調圈起來的錢不能動
+export const remainingText = (used, limit, hasReserved) =>
+  used > limit ? `超支 ${formatMoney(used - limit)}` : `${hasReserved ? '可自由花用' : '還剩'} ${formatMoney(limit - used)}`;
 
 export const monthKeyOf = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
