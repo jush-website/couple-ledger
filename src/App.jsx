@@ -848,7 +848,7 @@ export default function App() {
         <ErrorBoundary key={activeTab} compact>
         <Suspense fallback={<TabFallback />}>
         {activeTab === 'calendar' && (
-            <CalendarView events={events} anniversaries={anniversaries} role={role}
+            <CalendarView events={events} anniversaries={anniversaries} transactions={filteredTransactions} bookName={activeBook?.name} role={role}
               onSaveEvent={handleSaveEvent} onDeleteEvent={handleDeleteEvent} onSkipEventDay={handleSkipEventDay}
               onSaveAnniversary={handleSaveAnniversary} onDeleteAnniversary={handleDeleteAnniversary} />
         )}

@@ -7,9 +7,12 @@ import AnniversaryList from './AnniversaryList.jsx';
 import { monthGrid, shiftMonth, lunarLabel, holidaysOf, WEEKDAYS, weekdayOf, todayYmd } from '../lib/calendar.js';
 import { expandEvents, groupByDate, colorHex } from '../lib/events.js';
 import { momentsByDate } from '../lib/anniversaries.js';
+import { spendingByDate, compactMoney } from '../lib/dailySpend.js';
+import { formatMoney } from '../lib/format.js';
+import { CATEGORIES } from '../lib/constants.js';
 
 const FILTER_KEY = 'calendar-filter';
-const DEFAULT_FILTER = { owners: ['shared', 'bf', 'gf'], holidays: true, anniversaries: true };
+const DEFAULT_FILTER = { owners: ['shared', 'bf', 'gf'], holidays: true, anniversaries: true, spending: true };
 const readFilter = () => {
   try { return { ...DEFAULT_FILTER, ...JSON.parse(localStorage.getItem(FILTER_KEY) || '{}') }; } catch { return DEFAULT_FILTER; }
 };
@@ -34,7 +37,8 @@ const ChipFor = ({ item }) => {
   return <Chip className="text-white" style={{ backgroundColor: colorHex(item.e.color) }}>{item.e.time ? `${item.e.time.replace(/^0/, '')} ` : ''}{item.e.title}</Chip>;
 };
 
-const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent, onSkipEventDay, onSaveAnniversary, onDeleteAnniversary }) => {
+// transactions：目前帳本的記帳紀錄（跟總覽、統計同一本），用來顯示每日開銷
+const CalendarView = ({ events, anniversaries, transactions = [], bookName, role, onSaveEvent, onDeleteEvent, onSkipEventDay, onSaveAnniversary, onDeleteAnniversary }) => {
   const today = todayYmd();
   const [mode, setMode] = useState('calendar'); // calendar | anniversary
   const [ym, setYm] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) }));
@@ -57,6 +61,10 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
   const to = grid[grid.length - 1].date;
   const eventsByDate = useMemo(() => groupByDate(expandEvents(events, from, to, filter.owners)), [events, from, to, filter.owners]);
   const moments = useMemo(() => (filter.anniversaries ? momentsByDate(anniversaries, from, to) : {}), [anniversaries, from, to, filter.anniversaries]);
+  // 每日開銷：整個格子範圍（含前後月補的那幾天）一次算好
+  const spending = useMemo(() => spendingByDate(transactions, from, to), [transactions, from, to]);
+  const monthPrefix = `${ym.y}-${String(ym.m).padStart(2, '0')}`;
+  const monthTotal = Object.entries(spending).reduce((sum, [d, v]) => (d.startsWith(monthPrefix) ? sum + v : sum), 0);
   const holidaysFor = (date) => (filter.holidays ? holidaysOf(date) : []);
   const go = (delta) => setYm((c) => shiftMonth(c.y, c.m, delta));
   const goToday = () => setYm({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) });
@@ -64,6 +72,7 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
 
   const closeEvent = () => setEventModal(null);
   const closeAnn = () => setAnnModal(null);
+  const dayExpenses = dayOpen ? transactions.filter((t) => t.date === dayOpen && t.category !== 'repayment') : [];
   const dayItems = dayOpen ? itemsOf(dayOpen, { holidays: holidaysOf(dayOpen), moments: momentsByDate(anniversaries, dayOpen, dayOpen), events: groupByDate(expandEvents(events, dayOpen, dayOpen)) }) : [];
 
   return (
@@ -89,6 +98,12 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
             <button type="button" onClick={goToday} className="px-3 py-1.5 rounded-xl bg-surface border border-gray-200 text-xs font-bold text-gray-600">今天</button>
           </div>
 
+          {filter.spending && (
+            <div className="flex items-center justify-between px-1 text-xs font-bold text-gray-500">
+              <span className="truncate">「{bookName || '目前帳本'}」{ym.m}月支出</span>
+              <span className="text-gray-800 shrink-0">{formatMoney(monthTotal)}</span>
+            </div>
+          )}
           <div className="bg-surface rounded-2xl border border-gray-100 shadow-xs overflow-hidden"
             onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
             onTouchEnd={(e) => { if (touchX.current === null) return; const dx = e.changedTouches[0].clientX - touchX.current; touchX.current = null; if (Math.abs(dx) > 60) go(dx < 0 ? 1 : -1); }}>
@@ -110,6 +125,7 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
                     </div>
                     {items.slice(0, MAX_CHIPS).map((item) => <ChipFor key={item.key} item={item} />)}
                     {items.length > MAX_CHIPS && <span className="text-[9px] font-bold text-gray-400 px-1">+{items.length - MAX_CHIPS}</span>}
+                    {filter.spending && spending[date] > 0 && <span className="mt-auto text-right text-[10px] font-black text-gray-600 px-0.5 truncate">{compactMoney(spending[date])}</span>}
                   </button>
                 );
               })}
@@ -134,7 +150,7 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
                 ))}
               </div>
             </div>
-            {[['holidays', '顯示節日與國定假日'], ['anniversaries', '顯示紀念日']].map(([key, label]) => (
+            {[['spending', '顯示每日開銷'], ['holidays', '顯示節日與國定假日'], ['anniversaries', '顯示紀念日']].map(([key, label]) => (
               <label key={key} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-700">
                 {label}<input type="checkbox" checked={filter[key]} onChange={(e) => updateFilter({ [key]: e.target.checked })} className="w-5 h-5" />
               </label>
@@ -147,7 +163,7 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
       {dayOpen && !eventModal && (
         <ModalLayout title={`${Number(dayOpen.slice(5, 7))}月${Number(dayOpen.slice(8))}日 週${WEEKDAYS[weekdayOf(dayOpen)]}${lunarLabel(dayOpen) ? `・農曆${lunarLabel(dayOpen)}` : ''}`} onClose={() => setDayOpen(null)}>
           <div className="space-y-2 pt-1">
-            {dayItems.length === 0 && <p className="text-center text-sm text-gray-400 py-6">這天還沒有行程</p>}
+            {dayItems.length === 0 && dayExpenses.length === 0 && <p className="text-center text-sm text-gray-400 py-6">這天還沒有行程</p>}
             {dayItems.map((item) => {
               if (item.kind === 'holiday') return <div key={item.key} className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 text-sm font-bold"><span className={`w-2 h-2 rounded-full ${item.h.dayOff ? 'bg-red-500' : 'bg-orange-400'}`} />{item.h.name}{item.h.dayOff && <span className="text-[10px] text-red-500">國定假日</span>}</div>;
               if (item.kind === 'moment') return <div key={item.key} className="flex items-center gap-2 p-3 rounded-xl bg-pink-50 text-sm font-bold text-pink-600"><Heart size={14} />{item.m.name}{item.m.label && `・${item.m.label}`}</div>;
@@ -163,6 +179,24 @@ const CalendarView = ({ events, anniversaries, role, onSaveEvent, onDeleteEvent,
                 </button>
               );
             })}
+            {dayExpenses.length > 0 && (
+              <div className="pt-2 space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-400 px-1">
+                  <span>當日開銷・{dayExpenses.length} 筆</span>
+                  <span className="text-gray-800">{formatMoney(dayExpenses.reduce((s, t) => s + (Number(t.amount) || 0), 0))}</span>
+                </div>
+                {dayExpenses.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-gray-50 text-sm">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: CATEGORIES.find((c) => c.id === t.category)?.color || '#999' }} />
+                      <span className="font-bold text-gray-800 truncate">{t.note || CATEGORIES.find((c) => c.id === t.category)?.name || '未分類'}</span>
+                      <span className={`text-[11px] shrink-0 ${t.paidBy === 'bf' ? 'text-blue-500' : 'text-pink-500'}`}>{t.paidBy === 'bf' ? '男友付' : '女友付'}</span>
+                    </span>
+                    <span className="font-bold text-gray-800 shrink-0">{formatMoney(t.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <button type="button" onClick={() => setEventModal({ initial: null, defaultDate: dayOpen })} className="w-full py-3 rounded-xl border-2 border-dashed border-gray-200 text-sm font-bold text-gray-500 flex items-center justify-center gap-1"><Plus size={16} />在這天新增行程</button>
           </div>
         </ModalLayout>

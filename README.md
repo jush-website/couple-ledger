@@ -48,6 +48,7 @@ src/
     calendar.js  月曆格子、農曆、台灣節日（+ calendar.test.mjs）
     events.js    行程與重複規則（+ events.test.mjs）
     anniversaries.js 紀念日天數與里程碑（+ anniversaries.test.mjs）
+    dailySpend.js 日曆格子的每日開銷（+ dailySpend.test.mjs）
   components/    32 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
@@ -109,7 +110,9 @@ src/
 
 - **月曆**：週日開始、固定 6 週；每格顯示國曆、農曆（`Intl` 的中國曆，不用套件，初一顯示月份）、
   節日（國定假日紅底）、紀念日里程碑（♥）、行程。左右滑動或點標題換月份，「今天」跳回本月。
-  篩選（誰的行程、節日、紀念日）存 localStorage。點日期看當天明細並可在那天新增行程。
+  篩選（每日開銷、誰的行程、節日、紀念日）存 localStorage。點日期看當天明細並可在那天新增行程。
+- **每日開銷**：格子右下角是當天支出（不含還款），一萬以上顯示「1.2萬」；月份標題下有當月合計；
+  當天明細列出每一筆。用的是目前選的帳本（跟總覽、統計同一本）。
 - **節日**：國曆固定日、農曆（春節、端午、中秋、重陽、七夕…）、除夕（隔天是正月初一）、清明（節氣公式）、母親節。
   **補假與調整放假**每年由行政院公告，無法用公式算，沒有處理。
 - **行程**：`{ title, date, time, owner, color, repeat, until, exceptions, note }`。重複規則 none/weekly/monthly/yearly，
