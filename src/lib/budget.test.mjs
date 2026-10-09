@@ -1,6 +1,6 @@
 // node src/lib/budget.test.mjs
 import assert from 'node:assert/strict';
-import { normalizeBudget, hasBudget, getBudgetStatus, monthKeyOf } from './budget.js';
+import { normalizeBudget, hasBudget, getBudgetStatus, monthKeyOf, remainingText } from './budget.js';
 
 // 正規化：負數、字串、不存在的分類都要處理掉
 assert.deepEqual(normalizeBudget({ total: '20000', categories: { food: 8000, bogus: 100, transport: -5, house: '' } }), { total: 20000, categories: { food: 8000 } });
@@ -41,4 +41,8 @@ assert.equal(monthKeyOf(new Date(2026, 0, 5)), '2026-01');
   assert.equal(withRes.categories[0].spent, 0);
   assert.equal(withRes.categories[0].reserved, 6000);
 }
+assert.equal(remainingText(3000, 10000, false), '還剩 $7,000');
+assert.equal(remainingText(3000, 10000, true), '可自由花用 $7,000');
+assert.equal(remainingText(12000, 10000, true), '超支 $2,000');
+
 console.log('budget.js OK');

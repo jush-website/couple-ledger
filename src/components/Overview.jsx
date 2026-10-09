@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
-import { Plus, Trash2, RefreshCw, CheckCircle, Camera, Mic } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Camera, Mic } from 'lucide-react';
 import { formatMoney, calculateExpense } from '../lib/format.js';
 import { CATEGORIES } from '../lib/constants.js';
 import { isVoiceSupported } from '../lib/speech.js';
 import { monthKeyOf } from '../lib/budget.js';
-import BudgetCard from './BudgetCard.jsx';
-import ReservationsCard from './ReservationsCard.jsx';
+import SummaryCard from './SummaryCard.jsx';
 
 const Overview = ({ transactions, budget, onEditBudget, reservations = [], reservedThisMonth = [], today, onAddReservation, onEditReservation, onPayReservation, onAdd, onEdit, onDelete, onScan, onVoice, onRepay, readOnly }) => {
   const debt = useMemo(() => {
@@ -29,14 +28,10 @@ const Overview = ({ transactions, budget, onEditBudget, reservations = [], reser
 
   return (
     <div className="space-y-6 animate-[fadeIn_0.5s_ease-out]">
-      <div className="bg-surface p-6 rounded-3xl shadow-xs border border-gray-100 text-center relative overflow-hidden">
-        <div className={`absolute top-0 left-0 w-full h-1 ${Math.abs(debt) < 1 ? 'bg-green-400' : (debt > 0 ? 'bg-blue-400' : 'bg-pink-400')}`}></div>
-        <h2 className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">本帳本結算</h2>
-        <div className="flex items-center justify-center gap-2">{Math.abs(debt) < 1 ? <div className="text-2xl font-black text-green-500 flex items-center gap-2"><CheckCircle /> 互不相欠</div> : <><span className={`text-3xl font-black ${debt > 0 ? 'text-blue-500' : 'text-pink-500'}`}>{debt > 0 ? '男朋友' : '女朋友'}</span><span className="text-gray-400 text-sm">先墊了</span><span className="text-2xl font-bold text-gray-800">{formatMoney(Math.abs(debt))}</span></>}</div>
-        {Math.abs(debt) >= 1 && !readOnly && (<button onClick={() => onRepay(debt)} className="mt-4 px-6 py-2 bg-gray-900 text-surface text-sm font-bold rounded-xl shadow-lg active:scale-95 transition-transform flex items-center gap-2 mx-auto"><RefreshCw size={16} /> 登記還款</button>)}
-      </div>
-      <BudgetCard transactions={transactions} budget={budget} monthKey={monthKeyOf(new Date())} compact onEdit={readOnly ? undefined : onEditBudget} reserved={reservedThisMonth} />
-      <ReservationsCard reservations={reservations} thisMonth={reservedThisMonth} today={today} readOnly={readOnly} onAdd={onAddReservation} onEdit={onEditReservation} onPay={onPayReservation} />
+      <SummaryCard debt={debt} readOnly={readOnly} onRepay={onRepay}
+        transactions={transactions} budget={budget} monthKey={monthKeyOf(new Date())} onEditBudget={onEditBudget}
+        reservations={reservations} reservedThisMonth={reservedThisMonth} today={today}
+        onAddReservation={onAddReservation} onEditReservation={onEditReservation} onPayReservation={onPayReservation} />
       <div className="space-y-4">
         <div className="flex justify-between items-end px-2"><h3 className="font-bold text-lg text-gray-800">最近紀錄</h3>{!readOnly && (<div className="flex gap-2">{isVoiceSupported() && (<button onClick={onVoice} aria-label="語音記帳" className="bg-purple-100 text-purple-600 p-3 rounded-xl shadow-xs active:scale-90 transition-transform"><Mic size={20} /></button>)}<button onClick={onScan} aria-label="掃描收據" className="bg-purple-100 text-purple-600 p-3 rounded-xl shadow-xs active:scale-90 transition-transform"><Camera size={20} /></button><button onClick={onAdd} className="bg-gray-900 text-surface p-3 rounded-xl shadow-lg shadow-gray-300 active:scale-90 transition-transform"><Plus size={20} /></button></div>)}</div>
         {grouped.length === 0 ? <div className="text-center py-10 text-gray-400">本帳本還沒有紀錄喔</div> : grouped.map(([date, items]) => {

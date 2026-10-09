@@ -36,6 +36,16 @@ export const daysUntil = (dueDate, today) => {
   return Math.round((toUtc(dueDate) - toUtc(today)) / 86400000);
 };
 
+// 付款倒數的文字與緊急程度：late 逾期、soon 7 天內（含今天）、normal 還早、none 沒填日期
+export const dueInfo = (dueDate, today) => {
+  const days = daysUntil(dueDate, today);
+  if (days === null) return { text: '未定付款日', tone: 'none' };
+  const md = `${Number(dueDate.slice(5, 7))}/${Number(dueDate.slice(8, 10))}`;
+  if (days < 0) return { text: `${md}・已逾期 ${-days} 天`, tone: 'late' };
+  if (days === 0) return { text: `${md}・今天要付`, tone: 'soon' };
+  return { text: `${md}・還有 ${days} 天`, tone: days <= 7 ? 'soon' : 'normal' };
+};
+
 // 付款時帶進「記一筆」的欄位：共同的照平分、個人的算那個人自己的
 export const toTransactionPrefill = (r, currentRole, today) => ({
   amount: r.amount,
