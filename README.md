@@ -31,8 +31,10 @@ api/
   gold.js          台銀／Yahoo 金價爬取
   _nim.js          NVIDIA NIM 共用呼叫層（底線開頭 = 不是 route）
   receipt.js       收據辨識 → 品項清單
+  ical.js          代抓訂閱的 Google 日曆（iCal 私人網址），回傳某段期間的行程
+  _ics.js          iCalendar 解析與重複規則展開（底線開頭 = 不是 route）
   parse-entry.js   語音文字 → 記帳欄位
-  *.test.mjs       node api/_nim.test.mjs / receipt.test.mjs / parse-entry.test.mjs
+  *.test.mjs       node api/_nim.test.mjs / _ics.test.mjs / receipt.test.mjs / parse-entry.test.mjs
                    （前端的純函式測試：for t in src/lib/*.test.mjs; do node $t; done）
 src/
   lib/
@@ -49,7 +51,7 @@ src/
     events.js    行程與重複規則（+ events.test.mjs）
     anniversaries.js 紀念日天數與里程碑（+ anniversaries.test.mjs）
     dailySpend.js 日曆格子的每日開銷（+ dailySpend.test.mjs）
-  components/    32 個元件
+  components/    33 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -118,6 +120,13 @@ src/
 - **行程**：`{ title, date, time, owner, color, repeat, until, exceptions, note }`。重複規則 none/weekly/monthly/yearly，
   只存一筆文件，顯示時用 `expandEvents` 展開；每月 31 號、2/29 這種「那個月沒有這天」的會跳過。
   重複行程「只刪這天」寫進 `exceptions`（`arrayUnion`），修改會套用到整個重複行程。
+- **連結 Google 日曆**（日曆工具列的 🔗）：貼上 Google 日曆「iCal 格式的私人網址」，
+  存在 `calendar_feeds_{coupleId}`（`{ name, url, owner, color }`），兩個人的日曆都會顯示、唯讀。
+  瀏覽器不能跨網域讀，所以由 `/api/ical` 代抓並解析（`api/_ics.js`：整天／時區／多天、
+  RRULE DAILY/WEEKLY/MONTHLY/YEARLY、EXDATE、RECURRENCE-ID、取消）。
+  只允許 `calendar.google.com` 與 iCloud 網域；回應 `Cache-Control: private`（網址本身是秘密，不給 CDN 快取）。
+  前端 `src/lib/icalFeed.js` 同一個月 5 分鐘內不重抓，離線時顯示上次的結果。
+  私人網址等於日曆的鑰匙，所以**沒有**放進備份檔（`BACKUP_COLLECTIONS` 不含 `calendar_feeds`）。
 - **紀念日**：`since`（累計，6/20→10/9＝已過 111 天，跟一般紀念日 App 相同）、`yearly`（生日）、`countdown`（單次倒數）。
   里程碑：每 100 天、`SPECIAL_DAYS`（99、111、520、1314…）、每週年；「即將到來」列 30 天內的。
 

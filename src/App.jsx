@@ -93,6 +93,7 @@ export default function App() {
   const [goldTransactions, setGoldTransactions] = useState([]);
   const [events, setEvents] = useState([]);
   const [anniversaries, setAnniversaries] = useState([]);
+  const [calendarFeeds, setCalendarFeeds] = useState([]);
   
   const [activeBookId, setActiveBookId] = useState(null);
   const [viewArchived, setViewArchived] = useState(false);
@@ -339,6 +340,7 @@ export default function App() {
         const goldRef = coupleCol('gold_transactions', cid);
         const eventsRef = coupleCol('events', cid);
         const annRef = coupleCol('anniversaries', cid);
+        const feedsRef = coupleCol('calendar_feeds', cid);
         
         const unsubBooks = onSnapshot(booksRef, async (s) => {
             const data = s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -384,7 +386,13 @@ export default function App() {
             setAnniversaries(s.docs.map(d => normalizeAnniversary({ id: d.id, ...d.data() })).filter(a => a.date));
         }, (e) => console.error(e));
 
-        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); unsubEvents(); unsubAnn(); };
+        // 連結的 Google 日曆（iCal 私人網址）：存在共用空間，兩個人的日曆都會顯示
+        const unsubFeeds = onSnapshot(feedsRef, (s) => {
+            setCalendarFeeds(s.docs.map(d => ({ id: d.id, ...d.data() })).filter(f => typeof f.url === 'string' && f.url)
+                .map(f => ({ id: f.id, name: f.name || 'Google 日曆', url: f.url, owner: ['bf', 'gf', 'shared'].includes(f.owner) ? f.owner : 'shared', color: f.color || 'blue' })));
+        }, (e) => console.error(e));
+
+        return () => { unsubTrans(); unsubJars(); unsubBooks(); unsubGold(); unsubEvents(); unsubAnn(); unsubFeeds(); };
     } catch (e) { console.error(e); }
     // 只看 uid 與 coupleId：profile 每次快照都是新物件，原本依賴整個 profile
     // 會讓四個集合的監聽全部退訂再重訂一次（重新下載全部資料）。
@@ -502,6 +510,21 @@ export default function App() {
           onConfirm: () => {
               commitInBackground(deleteDoc(coupleDoc('anniversaries', profile.coupleId, id)), '刪除沒有同步到雲端，請再試一次 ❌');
               savedToast('紀念日已刪除 🗑️'); setConfirmModal({ isOpen: false }); done?.();
+          }
+      });
+  };
+
+  const handleSaveFeed = (id, data) => {
+      if (!profile) return;
+      if (id) commitInBackground(updateDoc(coupleDoc('calendar_feeds', profile.coupleId, id), data), '沒有存到雲端，請再試一次 ❌');
+      else commitInBackground(addDoc(coupleCol('calendar_feeds', profile.coupleId), { ...data, createdBy: profile.role, createdAt: serverTimestamp() }), '沒有存到雲端，請再試一次 ❌');
+      savedToast('Google 日曆已連結 🔗');
+  };
+  const handleDeleteFeed = (id) => {
+      setConfirmModal({ isOpen: true, title: '取消連結', message: '確定不再顯示這個 Google 日曆嗎？（Google 那邊的行程不會被刪掉）', isDanger: true,
+          onConfirm: () => {
+              commitInBackground(deleteDoc(coupleDoc('calendar_feeds', profile.coupleId, id)), '沒有同步到雲端，請再試一次 ❌');
+              savedToast('已取消連結'); setConfirmModal({ isOpen: false });
           }
       });
   };
@@ -849,6 +872,7 @@ export default function App() {
         <Suspense fallback={<TabFallback />}>
         {activeTab === 'calendar' && (
             <CalendarView events={events} anniversaries={anniversaries} transactions={filteredTransactions} bookName={activeBook?.name} role={role}
+              feeds={calendarFeeds} onSaveFeed={handleSaveFeed} onDeleteFeed={handleDeleteFeed}
               onSaveEvent={handleSaveEvent} onDeleteEvent={handleDeleteEvent} onSkipEventDay={handleSkipEventDay}
               onSaveAnniversary={handleSaveAnniversary} onDeleteAnniversary={handleDeleteAnniversary} />
         )}

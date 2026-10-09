@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Plus, Heart, CalendarDays } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Filter, Plus, Heart, CalendarDays, Link2 } from 'lucide-react';
 import ModalLayout from './ModalLayout.jsx';
 import EventModal from './EventModal.jsx';
 import AnniversaryModal from './AnniversaryModal.jsx';
 import AnniversaryList from './AnniversaryList.jsx';
+import CalendarFeedsModal from './CalendarFeedsModal.jsx';
+import { fetchFeedEvents } from '../lib/icalFeed.js';
 import { monthGrid, shiftMonth, lunarLabel, holidaysOf, WEEKDAYS, weekdayOf, todayYmd } from '../lib/calendar.js';
 import { expandEvents, groupByDate, colorHex } from '../lib/events.js';
 import { momentsByDate } from '../lib/anniversaries.js';
@@ -18,27 +20,31 @@ const readFilter = () => {
 };
 const OWNER_LABEL = { shared: '共同', bf: '男友', gf: '女友' };
 const MAX_CHIPS = 3;
+const NO_FEEDS = []; // 固定的空陣列：預設值每次都 new [] 的話，下面的 effect 會一直重跑
 
 // 格子裡的一個標籤：節日、紀念日、行程共用。格子很窄，最多折成兩行，時間＋名稱才看得到
 const Chip = ({ className = '', style, children }) => (
   <div className={`text-[10px] leading-[1.3] font-bold px-1 py-px rounded break-all line-clamp-2 ${className}`} style={style}>{children}</div>
 );
 
-// 一天裡要顯示的東西，依序：節日 → 紀念日 → 行程
-const itemsOf = (date, { holidays, moments, events }) => [
+// 一天裡要顯示的東西，依序：節日 → 紀念日 → 行程 → 連結的 Google 日曆
+const itemsOf = (date, { holidays, moments, events, feeds = {} }) => [
   ...holidays.map((h) => ({ key: `h-${h.name}`, kind: 'holiday', h })),
   ...(moments[date] || []).map((m) => ({ key: `a-${m.id}-${m.label}`, kind: 'moment', m })),
   ...(events[date] || []).map((e) => ({ key: `e-${e.id}`, kind: 'event', e })),
+  ...(feeds[date] || []).map((f) => ({ key: `f-${f.feedId}-${f.id}`, kind: 'feed', f })),
 ];
 
 const ChipFor = ({ item }) => {
   if (item.kind === 'holiday') return <Chip className={item.h.dayOff ? 'bg-red-500 text-white' : 'bg-orange-100 text-orange-600'}>{item.h.name}</Chip>;
   if (item.kind === 'moment') return <Chip className="bg-pink-100 text-pink-600">♥{item.m.label || item.m.name}</Chip>;
-  return <Chip className="text-white" style={{ backgroundColor: colorHex(item.e.color) }}>{item.e.time ? `${item.e.time.replace(/^0/, '')} ` : ''}{item.e.title}</Chip>;
+  const e = item.kind === 'feed' ? item.f : item.e;
+  return <Chip className="text-white" style={{ backgroundColor: colorHex(e.color) }}>{e.time ? `${e.time.replace(/^0/, '')} ` : ''}{e.title}</Chip>;
 };
 
 // transactions：目前帳本的記帳紀錄（跟總覽、統計同一本），用來顯示每日開銷
-const CalendarView = ({ events, anniversaries, transactions = [], bookName, role, onSaveEvent, onDeleteEvent, onSkipEventDay, onSaveAnniversary, onDeleteAnniversary }) => {
+// feeds：連結的 Google 日曆（共用，兩人都看得到）{ id, name, url, owner, color }
+const CalendarView = ({ events, anniversaries, transactions = [], bookName, role, onSaveEvent, onDeleteEvent, onSkipEventDay, onSaveAnniversary, onDeleteAnniversary, feeds = NO_FEEDS, onSaveFeed, onDeleteFeed }) => {
   const today = todayYmd();
   const [mode, setMode] = useState('calendar'); // calendar | anniversary
   const [ym, setYm] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) }));
@@ -47,6 +53,9 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
   const [dayOpen, setDayOpen] = useState(null);       // 打開明細的那一天
   const [eventModal, setEventModal] = useState(null); // { initial, defaultDate, occurrence }
   const [annModal, setAnnModal] = useState(null);     // { initial }
+  const [showFeeds, setShowFeeds] = useState(false);
+  const [feedEvents, setFeedEvents] = useState({});   // feedId → [{ id, title, date, time }]
+  const [feedErrors, setFeedErrors] = useState({});   // feedId → 錯誤訊息
   const touchX = useRef(null);
 
   const updateFilter = (patch) => setFilter((f) => {
@@ -65,6 +74,30 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
   const spending = useMemo(() => spendingByDate(transactions, from, to), [transactions, from, to]);
   const monthPrefix = `${ym.y}-${String(ym.m).padStart(2, '0')}`;
   const monthTotal = Object.entries(spending).reduce((sum, [d, v]) => (d.startsWith(monthPrefix) ? sum + v : sum), 0);
+  // 連結的 Google 日曆：換月份或日曆清單變了就重抓（有 5 分鐘快取）
+  useEffect(() => {
+    let cancelled = false;
+    for (const feed of feeds) {
+      fetchFeedEvents(feed, from, to)
+        .then((data) => {
+          if (cancelled) return;
+          setFeedEvents((m) => ({ ...m, [feed.id]: data.events || [] }));
+          setFeedErrors((m) => ({ ...m, [feed.id]: data.stale ? '目前離線，顯示上次的資料' : '' }));
+        })
+        .catch((e) => { if (!cancelled) setFeedErrors((m) => ({ ...m, [feed.id]: e.message || '讀取失敗' })); });
+    }
+    return () => { cancelled = true; };
+  }, [feeds, from, to]);
+  const feedsByDate = useMemo(() => {
+    const map = {};
+    for (const feed of feeds) {
+      if (!filter.owners.includes(feed.owner)) continue;
+      for (const ev of feedEvents[feed.id] || []) (map[ev.date] ||= []).push({ ...ev, feedId: feed.id, feedName: feed.name, color: feed.color, owner: feed.owner });
+    }
+    for (const list of Object.values(map)) list.sort((a, b) => a.time.localeCompare(b.time));
+    return map;
+  }, [feeds, feedEvents, filter.owners]);
+  const feedTrouble = feeds.some((f) => feedErrors[f.id] && !feedErrors[f.id].startsWith('目前離線'));
   const holidaysFor = (date) => (filter.holidays ? holidaysOf(date) : []);
   const go = (delta) => setYm((c) => shiftMonth(c.y, c.m, delta));
   const goToday = () => setYm({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) });
@@ -73,7 +106,7 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
   const closeEvent = () => setEventModal(null);
   const closeAnn = () => setAnnModal(null);
   const dayExpenses = dayOpen ? transactions.filter((t) => t.date === dayOpen && t.category !== 'repayment') : [];
-  const dayItems = dayOpen ? itemsOf(dayOpen, { holidays: holidaysOf(dayOpen), moments: momentsByDate(anniversaries, dayOpen, dayOpen), events: groupByDate(expandEvents(events, dayOpen, dayOpen)) }) : [];
+  const dayItems = dayOpen ? itemsOf(dayOpen, { holidays: holidaysOf(dayOpen), moments: momentsByDate(anniversaries, dayOpen, dayOpen), events: groupByDate(expandEvents(events, dayOpen, dayOpen)), feeds: feedsByDate }) : [];
 
   return (
     <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
@@ -85,7 +118,10 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
       {mode === 'calendar' ? (
         <>
           <div className="flex items-center justify-between">
-            <button type="button" onClick={() => setShowFilter(true)} aria-label="篩選" className={`p-2 rounded-xl ${filtered ? 'bg-gray-800 text-surface' : 'text-gray-500'}`}><Filter size={18} /></button>
+            <div className="flex items-center">
+              <button type="button" onClick={() => setShowFilter(true)} aria-label="篩選" className={`p-2 rounded-xl ${filtered ? 'bg-gray-800 text-surface' : 'text-gray-500'}`}><Filter size={18} /></button>
+              <button type="button" onClick={() => setShowFeeds(true)} aria-label="連結 Google 日曆" className="relative p-2 rounded-xl text-gray-500"><Link2 size={18} />{feedTrouble && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />}</button>
+            </div>
             <div className="flex items-center gap-1">
               <button type="button" onClick={() => go(-1)} aria-label="上個月" className="p-2 text-gray-500"><ChevronLeft size={20} /></button>
               {/* 透明的月份選擇器疊在標題上：點標題就能直接跳到某年某月 */}
@@ -113,7 +149,7 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
             <div className="grid grid-cols-7">
               {grid.map(({ date, inMonth }) => {
                 const holidays = holidaysFor(date);
-                const items = itemsOf(date, { holidays, moments, events: eventsByDate });
+                const items = itemsOf(date, { holidays, moments, events: eventsByDate, feeds: feedsByDate });
                 const dow = weekdayOf(date);
                 const red = dow === 0 || holidays.some((h) => h.dayOff);
                 const isToday = date === today;
@@ -160,6 +196,11 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
         </ModalLayout>
       )}
 
+      {showFeeds && (
+        <CalendarFeedsModal feeds={feeds} errors={feedErrors} role={role} onClose={() => setShowFeeds(false)}
+          onSave={(data) => onSaveFeed(null, data)} onDelete={(id) => onDeleteFeed(id)} />
+      )}
+
       {dayOpen && !eventModal && (
         <ModalLayout title={`${Number(dayOpen.slice(5, 7))}月${Number(dayOpen.slice(8))}日 週${WEEKDAYS[weekdayOf(dayOpen)]}${lunarLabel(dayOpen) ? `・農曆${lunarLabel(dayOpen)}` : ''}`} onClose={() => setDayOpen(null)}>
           <div className="space-y-2 pt-1">
@@ -167,6 +208,19 @@ const CalendarView = ({ events, anniversaries, transactions = [], bookName, role
             {dayItems.map((item) => {
               if (item.kind === 'holiday') return <div key={item.key} className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 text-sm font-bold"><span className={`w-2 h-2 rounded-full ${item.h.dayOff ? 'bg-red-500' : 'bg-orange-400'}`} />{item.h.name}{item.h.dayOff && <span className="text-[10px] text-red-500">國定假日</span>}</div>;
               if (item.kind === 'moment') return <div key={item.key} className="flex items-center gap-2 p-3 rounded-xl bg-pink-50 text-sm font-bold text-pink-600"><Heart size={14} />{item.m.name}{item.m.label && `・${item.m.label}`}</div>;
+              if (item.kind === 'feed') {
+                const f = item.f;
+                return (
+                  <div key={item.key} className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                    <span className="w-1.5 self-stretch rounded-full" style={{ backgroundColor: colorHex(f.color) }} />
+                    <span className="text-xs font-bold text-gray-500 w-11 shrink-0">{f.time || '整天'}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-bold text-gray-800 truncate">{f.title}</span>
+                      <span className="block text-[11px] text-gray-400 truncate">{OWNER_LABEL[f.owner]}・{f.feedName}（Google 日曆，唯讀）</span>
+                    </span>
+                  </div>
+                );
+              }
               const e = item.e;
               return (
                 <button key={item.key} type="button" onClick={() => setEventModal({ initial: e, defaultDate: dayOpen, occurrence: dayOpen })} className="w-full flex items-center gap-3 p-3 rounded-xl bg-gray-50 text-left active:bg-gray-100">
