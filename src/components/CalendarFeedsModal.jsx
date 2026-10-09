@@ -71,7 +71,10 @@ const CalendarFeedsModal = ({ feeds, errors, role, onClose, onSave, onDelete }) 
                 <li>貼到下面。這個網址等於日曆的鑰匙，不要傳給別人；外流的話可以在同一個地方按「重設」。</li>
               </ol>
             )}
-            <input type="url" inputMode="url" value={url} onChange={(e) => { setUrl(e.target.value); setTestError(''); }} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" className="w-full bg-gray-50 rounded-xl p-3 text-xs font-mono outline-hidden focus:ring-2 focus:ring-blue-100" />
+            {showHelp && (
+              <p className="text-[11px] text-gray-500 bg-gray-50 rounded-lg p-3">別人分享的<b>公開日曆</b>（例如班表、社團行事曆）也可以：直接貼它的<b>嵌入連結</b>（網址有 <code>embed?src=</code>）、分享連結或日曆 ID 就好。沒有公開的日曆會提示改用私人網址。</p>
+            )}
+            <input type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} value={url} onChange={(e) => { setUrl(e.target.value); setTestError(''); }} placeholder="iCal 私人網址，或公開日曆的嵌入連結" className="w-full bg-gray-50 rounded-xl p-3 text-xs font-mono outline-hidden focus:ring-2 focus:ring-blue-100" />
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="名稱（選填，例如：我的班表）" className="w-full bg-gray-50 rounded-xl p-3 text-sm font-bold outline-hidden" />
             <div className="flex bg-gray-100 rounded-xl p-1">
               {OWNERS.map((o) => (

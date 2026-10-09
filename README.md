@@ -124,6 +124,8 @@ src/
   存在 `calendar_feeds_{coupleId}`（`{ name, url, owner, color }`），兩個人的日曆都會顯示、唯讀。
   瀏覽器不能跨網域讀，所以由 `/api/ical` 代抓並解析（`api/_ics.js`：整天／時區／多天、
   RRULE DAILY/WEEKLY/MONTHLY/YEARLY、EXDATE、RECURRENCE-ID、取消）。
+  也接受公開日曆的嵌入連結（`/calendar/embed?src=ID`）、分享連結（`?cid=`）或日曆 ID，
+  自動換成公開網址 `/calendar/ical/ID/public/basic.ics`（`resolveFeedUrl`）；沒公開時 Google 回 404，會提示改用私人網址。
   只允許 `calendar.google.com` 與 iCloud 網域；回應 `Cache-Control: private`（網址本身是秘密，不給 CDN 快取）。
   前端 `src/lib/icalFeed.js` 同一個月 5 分鐘內不重抓，離線時顯示上次的結果。
   私人網址等於日曆的鑰匙，所以**沒有**放進備份檔（`BACKUP_COLLECTIONS` 不含 `calendar_feeds`）。

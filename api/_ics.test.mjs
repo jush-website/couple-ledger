@@ -2,7 +2,7 @@
 // 用 Google 日曆實際的輸出格式測解析與展開（含重複、例外、時區、多天）。
 import assert from 'node:assert/strict';
 import { parseIcs, expandIcs } from './_ics.js';
-import { checkFeedUrl } from './ical.js';
+import { checkFeedUrl, resolveFeedUrl } from './ical.js';
 
 const ics = `BEGIN:VCALENDAR
 PRODID:-//Google Inc//Google Calendar 70.9054//EN
@@ -112,5 +112,18 @@ assert.equal(checkFeedUrl('http://calendar.google.com/x.ics'), null);
 assert.equal(checkFeedUrl('https://evil.example.com/x.ics'), null);
 assert.equal(checkFeedUrl('https://calendar.google.com.evil.com/x.ics'), null);
 assert.equal(checkFeedUrl('not a url'), null);
+
+// 嵌入連結、分享連結（cid）、日曆 ID → 公開 iCal 網址
+const PUB = 'https://calendar.google.com/calendar/ical/kub82f55ovfiut9lfp2isfcgn4%40group.calendar.google.com/public/basic.ics';
+assert.deepEqual(resolveFeedUrl('https://calendar.google.com/calendar/embed?src=kub82f55ovfiut9lfp2isfcgn4%40group.calendar.google.com&ctz=Asia%2FTaipei'), { url: PUB, guessedPublic: true });
+assert.deepEqual(resolveFeedUrl('kub82f55ovfiut9lfp2isfcgn4@group.calendar.google.com'), { url: PUB, guessedPublic: true });
+const cid = Buffer.from('kub82f55ovfiut9lfp2isfcgn4@group.calendar.google.com').toString('base64').replace(/=+$/, '');
+assert.deepEqual(resolveFeedUrl(`https://calendar.google.com/calendar/u/0?cid=${cid}`), { url: PUB, guessedPublic: true });
+assert.equal(checkFeedUrl('https://calendar.google.com/calendar/embed?src=kub82f55ovfiut9lfp2isfcgn4%40group.calendar.google.com').href, PUB);
+// 私人網址維持原樣、不算公開
+assert.equal(resolveFeedUrl('https://calendar.google.com/calendar/ical/a%40gmail.com/private-x/basic.ics').guessedPublic, false);
+// 沒有日曆 ID 的 Google 網址、其他網域的「ID」都不接受
+assert.equal(checkFeedUrl('https://calendar.google.com/calendar/u/0/r'), null);
+assert.equal(checkFeedUrl('https://calendar.google.com/calendar/embed?src=not-an-id'), null);
 
 console.log('_ics.js OK');
