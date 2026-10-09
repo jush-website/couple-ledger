@@ -20,6 +20,8 @@ import { normalizeEvent } from './lib/events.js';
 import { normalizeAnniversary } from './lib/anniversaries.js';
 import { BACKUP_COLLECTIONS } from './lib/constants.js';
 import { useTheme } from './lib/theme.js';
+import { withReload } from './lib/lazyReload.js';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 import AppLoading from './components/AppLoading.jsx';
 import AuthAndPairing from './components/AuthAndPairing.jsx';
@@ -46,21 +48,21 @@ const lazyImports = {
   BookManagerModal: () => import('./components/BookManagerModal.jsx'),
   ReservationModal: () => import('./components/ReservationModal.jsx'),
 };
-const Statistics = lazy(lazyImports.Statistics);
-const Savings = lazy(lazyImports.Savings);
-const GoldView = lazy(lazyImports.GoldView);
-const SettingsView = lazy(lazyImports.SettingsView);
-const CalendarView = lazy(lazyImports.CalendarView);
-const AddJarModal = lazy(lazyImports.AddJarModal);
-const DepositModal = lazy(lazyImports.DepositModal);
-const JarHistoryModal = lazy(lazyImports.JarHistoryModal);
-const ReceiptScannerModal = lazy(lazyImports.ReceiptScannerModal);
-const VoiceEntryModal = lazy(lazyImports.VoiceEntryModal);
-const AddGoldModal = lazy(lazyImports.AddGoldModal);
-const RouletteModal = lazy(lazyImports.RouletteModal);
-const RepaymentModal = lazy(lazyImports.RepaymentModal);
-const BookManagerModal = lazy(lazyImports.BookManagerModal);
-const ReservationModal = lazy(lazyImports.ReservationModal);
+const Statistics = lazy(withReload(lazyImports.Statistics));
+const Savings = lazy(withReload(lazyImports.Savings));
+const GoldView = lazy(withReload(lazyImports.GoldView));
+const SettingsView = lazy(withReload(lazyImports.SettingsView));
+const CalendarView = lazy(withReload(lazyImports.CalendarView));
+const AddJarModal = lazy(withReload(lazyImports.AddJarModal));
+const DepositModal = lazy(withReload(lazyImports.DepositModal));
+const JarHistoryModal = lazy(withReload(lazyImports.JarHistoryModal));
+const ReceiptScannerModal = lazy(withReload(lazyImports.ReceiptScannerModal));
+const VoiceEntryModal = lazy(withReload(lazyImports.VoiceEntryModal));
+const AddGoldModal = lazy(withReload(lazyImports.AddGoldModal));
+const RouletteModal = lazy(withReload(lazyImports.RouletteModal));
+const RepaymentModal = lazy(withReload(lazyImports.RepaymentModal));
+const BookManagerModal = lazy(withReload(lazyImports.BookManagerModal));
+const ReservationModal = lazy(withReload(lazyImports.ReservationModal));
 
 const prefetchLazyChunks = () => {
   const run = () => Object.values(lazyImports).forEach((load) => load().catch(() => {}));
@@ -842,6 +844,8 @@ export default function App() {
             <Overview transactions={filteredTransactions} budget={activeBook?.budget} reservations={reservations} reservedThisMonth={reservedThisMonth} today={today} onAddReservation={() => { setEditingReservation(null); setShowReservation(true); }} onEditReservation={(r) => { setEditingReservation(r); setShowReservation(true); }} onPayReservation={handlePayReservation} onEditBudget={() => { setEditingBook(activeBook); setShowBookManager(true); }} role={role} readOnly={viewArchived} onAdd={() => { setEditingTransaction(null); setPayingReservation(null); setShowAddTransaction(true); }} onScan={() => setShowScanner(true)} onVoice={() => setShowVoice(true)} onEdit={(t) => { if(viewArchived) return; setPayingReservation(null); setEditingTransaction(t); setShowAddTransaction(true); }} onDelete={(id) => { if(viewArchived) return; handleDeleteTransaction(id); }} onRepay={(debt) => { setEditingTransaction(null); setPayingReservation(null); setRepaymentDebt(debt); }} />
         )}
 
+        {/* key=activeTab：某個分頁壞掉時，切到別的分頁就會重來，底部導覽列也還能用 */}
+        <ErrorBoundary key={activeTab} compact>
         <Suspense fallback={<TabFallback />}>
         {activeTab === 'calendar' && (
             <CalendarView events={events} anniversaries={anniversaries} role={role}
@@ -861,6 +865,7 @@ export default function App() {
             <SettingsView role={role} coupleId={profile.coupleId} onCopyCode={copyCode} onLogout={() => { signOut(auth); }} onExport={handleExportBackup} onImport={handleImportBackup} autoBackupTime={autoBackupTime} onRestoreAutoBackup={handleRestoreAutoBackup} theme={theme} onThemeChange={setTheme} />
         )}
         </Suspense>
+        </ErrorBoundary>
       </div>
 
       <div className="fixed bottom-0 left-0 w-full bg-surface border-t border-gray-200 z-50">

@@ -48,7 +48,7 @@ src/
     calendar.js  月曆格子、農曆、台灣節日（+ calendar.test.mjs）
     events.js    行程與重複規則（+ events.test.mjs）
     anniversaries.js 紀念日天數與里程碑（+ anniversaries.test.mjs）
-  components/    31 個元件
+  components/    32 個元件
   index.css      Tailwind + 主題變數
   App.jsx        狀態與資料流
 ```
@@ -66,7 +66,16 @@ src/
 - `public/manifest.webmanifest` + `public/icons/`：手機瀏覽器選「加到主畫面」就能像 App 一樣全螢幕開啟。
   狀態列顏色登入後會跟著角色與主題變（`App.jsx` 設定 `meta[name=theme-color]`）。
 - `public/sw.js`：只快取網頁外殼與 `/assets/*`，**HTML 一律先走網路**，所以新版部署後馬上生效。
-  不碰 `/api/*` 和 Firebase。改了快取策略要把裡面的 `CACHE` 版本號加一。
+  不碰 `/api/*` 和 Firebase；回來的是 HTML（檔案不存在）就不存。改了快取策略要把裡面的 `CACHE` 版本號加一。
+
+### 部署新版時的白畫面防護
+
+每次部署分頁程式檔都會換檔名。手機上還開著的舊頁面去抓舊檔名會失敗，以前會整頁白掉。現在：
+- `vercel.json` 的 SPA 改寫排除 `/assets/`、`/icons/`、`/api/`：找不到的檔案回真正的 404，不會回首頁 HTML。
+- `src/lib/lazyReload.js` 的 `withReload` 包住每個 `React.lazy`：載入失敗就自動重新整理一次拿新版
+  （每個分頁階段只試一次、離線時不試；背景預抓不包，免得把正在用的畫面重整掉）。
+- `ErrorBoundary`：整個 App 一層、分頁內容一層（`key={activeTab}`，切分頁會重來、導覽列不受影響）。
+  出錯時顯示錯誤訊息與「重新載入」（會先清 Service Worker 快取），不再是白畫面。
 - `src/lib/firebase.js` 開了 Firestore 的 `persistentLocalCache`（IndexedDB）：打開時先顯示上次的資料，
   沒訊號也能記帳，連線後自動同步。
   - 記帳、存帳本、收據多筆匯入不再 `await` 寫入（離線時那個 promise 要等連上伺服器才會 resolve），
